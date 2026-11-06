@@ -191,7 +191,7 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 | Goal 2: agrupamento de páginas | Parcial | Persistência de documentos e páginas e consulta por API prontas. Juntar e dividir documentos na revisão não existe. UI Streamlit fora do escopo por enquanto |
 | Goal 3: classificação por tipo | Parcial | Jev + Gemini e classificador por regras funcionando. O baseline TF-IDF + regressão logística não está implementado |
 | Goal 4: OCR pesquisável | Parcial | OCR e busca por texto no banco prontos. PDF pesquisável por documento não implementado: a busca é por texto no banco |
-| Goal 5: confiança e revisão humana | Parcial | Roteamento por limiares, `GET /revisao` e `POST /documentos/{id}/revisao` prontos; `scripts/relatorio_cobertura.py` gera a curva cobertura x precisão. Limiares ainda não escolhidos com dados reais. Sem tela de revisão |
+| Goal 5: confiança e revisão humana | Parcial | Roteamento por limiares, `GET /revisao` e `POST /documentos/{id}/revisao` prontos; `scripts/relatorio_cobertura.py` gera a curva cobertura x precisão. Limiares `CONF_AUTO=0,85` e `CONF_MIN=0,50` mantidos após a curva cobertura x precisão (ver Resultados). Sem tela de revisão |
 | Goal 6: score de risco de ponto | Não implementado | Em desenvolvimento; não existe nesta branch (sem `worker_analise`, `analise_ponto` nem endpoint) |
 | Goal 7: score de conformidade da empresa prestadora | Não implementado | Em desenvolvimento; não existe nesta branch (sem `documento_campos` nem `/lotes/{id}/conformidade`) |
 | UI Streamlit | Não implementado | Fora do escopo por enquanto |
@@ -210,9 +210,56 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 
 ## Resultados
 
-**Nenhuma métrica de qualidade foi medida ainda.** O gerador de lotes sintéticos (`gerar_lotes.py`) e o gabarito (`anotacoes.csv`) não estão neste repositório, então não há número de segmentação ou de classificação para reportar, e este README não cita acurácia, precisão ou recall.
+### Medições intermediárias (ajuste e treino) — NÃO são métricas finais
 
-Os scripts de avaliação já existem e usam só a biblioteca padrão do Python. Rodam no host, contra a API em execução, quando houver um `anotacoes.csv`:
+Dados do gerador sintético, em três conjuntos:
+
+| Conjunto | Seed | Lotes | Páginas | Documentos | Uso |
+|---|---|---|---|---|---|
+| Ajuste | 101 | 5 | 36 | 30 | ajuste de regras e prompts |
+| Treino | 202 | 20 | 204 | 159 | escolha de limiares e baseline |
+| Teste | 303 | 10 | 97 | - | **não foi usado**; será medido uma única vez, no final |
+
+Classificador Jev `typesafe/jev-1.13-20260917`. O Gemini deu segunda opinião em 3 documentos do treino e em nenhum do ajuste. Scripts: `scripts/avaliar_segmentacao.py`, `scripts/avaliar_classificacao.py` e `scripts/relatorio_cobertura.py`.
+
+**Ajuste (30 documentos)**
+
+- Segmentação: precisão das fronteiras 0,960, recall 0,960, documentos exatos 27/30 (0,900).
+- Classificação com Jev: acurácia 0,967, F1 macro 0,992 (todos os documentos).
+- Classificação com o classificador por regras: acurácia 0,867, F1 macro 0,810 (segmentação idêntica, 27/30).
+
+**Treino (159 documentos no gabarito, 163 previstos)**
+
+- Segmentação: precisão 0,909, recall 0,935, documentos exatos 134/159 (0,843).
+- Jev: acurácia 0,969 e F1 macro 0,979 (todos os documentos); acurácia 0,963 e F1 macro 0,978 só nos 134 com segmentação exata.
+- Estados: 146 classificados e 17 em revisão.
+
+**Cobertura x precisão (Jev, treino, 163 documentos previstos)**
+
+| Limiar | % automático | Precisão automática | % em revisão |
+|---|---|---|---|
+| 0,50 | 91,4 | 0,987 | 8,6 |
+| 0,60 | 90,8 | 0,993 | 9,2 |
+| 0,70 | 90,2 | 1,000 | 9,8 |
+| 0,80 | 90,2 | 1,000 | 9,8 |
+| 0,85 | 89,6 | 1,000 | 10,4 |
+| 0,90 | 89,0 | 1,000 | 11,0 |
+| 0,95 | 89,0 | 1,000 | 11,0 |
+
+No ajuste (30 documentos) a curva é plana: 93,3% automático, precisão 1,000 e 6,7% em revisão em todos os limiares de 0,50 a 0,95, porque a confiança do Jev está saturada (26 de 30 com 1,00).
+
+**Decisão:** `CONF_AUTO=0,85` e `CONF_MIN=0,50` foram mantidos. O limiar 0,70 é o menor com precisão automática 1,000, mas devolve ao automático só 1 de 163 documentos em relação a 0,85, diferença sem significância. `CONF_MIN` não foi escolhido pela curva, que não o mede. Os limiares foram avaliados no treino porque a curva do ajuste era plana. O treino também alimenta o baseline TF-IDF + regressão logística (`scripts/baseline_tfidf.py`, em PR separado; validação cruzada no treino com F1 macro 0,986, que não é métrica final), então o treino não é amostra independente para escolher limiares.
+
+**Ressalvas**
+
+- A segmentação foi pior no treino que no ajuste (0,843 contra 0,900 de documentos exatos), o que indica possível sobreajuste das regras ao ajuste.
+- As amostras são pequenas.
+- Os dados sintéticos são otimistas; a validação em documentos reais continua necessária.
+- A confiança do classificador por regras é uma heurística sem calibração.
+
+**Nota operacional:** para reclassificar um lote já concluído sem enviá-lo de novo (o upload é idempotente por SHA-256 e o worker ignora lotes `concluido`), mude o estado do lote para `recebido` no banco e reenfileire `segmentar_lote`. Isso apaga e refaz os documentos do lote. Não há endpoint para isso.
+
+Os scripts de avaliação usam só a biblioteca padrão do Python. Rodam no host, contra a API em execução, com um `anotacoes.csv`:
 
 ```bash
 python scripts/avaliar_segmentacao.py anotacoes.csv --api http://localhost:8000
@@ -221,5 +268,3 @@ python scripts/relatorio_cobertura.py anotacoes.csv --api http://localhost:8000
 
 - `scripts/avaliar_segmentacao.py`: precisão e recall das fronteiras e fração de documentos exatos (início e fim), por documento.
 - `scripts/relatorio_cobertura.py`: para cada limiar, % automático, precisão na parte automática e % em revisão.
-
-Os scripts em si foram executados apenas sobre um CSV mínimo de 3 páginas criado para conferir o funcionamento; esses valores não são resultado do projeto.
