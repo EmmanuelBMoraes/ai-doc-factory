@@ -1,4 +1,4 @@
-# Document AI Factory
+# DocRisk AI
 
 Projeto de hackathon. Recebe um PDF de lote com muitas páginas escaneadas (ou uma imagem), faz OCR de cada página, separa os documentos do lote, classifica cada um por tipo documental e envia os casos duvidosos para uma fila de revisão humana. O texto das páginas fica no PostgreSQL e pode ser pesquisado.
 

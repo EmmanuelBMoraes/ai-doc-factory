@@ -1,4 +1,4 @@
-# Passagem do projeto: Document AI Factory
+# Passagem do projeto: DocRisk AI
 
 Leia primeiro o `CLAUDE.md`, que é a especificação e as regras de trabalho. O `README.md` explica como rodar e traz os números medidos (seção Resultados).
 

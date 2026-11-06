@@ -1,4 +1,4 @@
-# Document AI Factory
+# DocRisk AI
 
 Projeto de hackathon (7 horas). Recebe PDFs de lote com muitas páginas escaneadas, separa cada documento, classifica por tipo, gera OCR pesquisável e manda casos duvidosos para revisão humana.
 

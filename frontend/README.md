@@ -1,6 +1,6 @@
-# Frontend - AI Doc Factory
+# Frontend - DocRisk AI
 
-Este é o frontend da aplicação **AI Doc Factory**, uma plataforma para processamento, classificação e análise de conformidade de documentos utilizando Inteligência Artificial.
+Este é o frontend da aplicação **DocRisk AI**, uma plataforma para processamento, classificação e análise de conformidade de documentos utilizando Inteligência Artificial.
 
 ## 🏗️ Arquitetura e Organização
 

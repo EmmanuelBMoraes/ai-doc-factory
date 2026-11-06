@@ -14,7 +14,7 @@ from app.routers.revisao.routers import router as revisao
 from app.routers.saude.routers import router as saude
 from app.routers.tipos.routers import router as tipos
 
-app = FastAPI(title="Document AI Factory")
+app = FastAPI(title="DocRisk AI")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
