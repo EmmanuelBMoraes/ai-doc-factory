@@ -92,8 +92,9 @@ Os dados sintéticos são otimistas. O README deve registrar que a validação e
 3. Goal 3 com um classificador simples para fechar o fluxo, depois trocar por Jev + Gemini.
 4. Goal 5 (roteamento e revisão) e script de avaliação com números reais.
 5. Goal 6 (análise de risco das folhas de ponto).
-6. Goal 2 (refinamentos de agrupamento/correção). **Por enquanto, só backend:** não implemente a UI Streamlit nem o serviço `ui` até nova decisão.
-7. README com como rodar, arquitetura, resultados medidos e limitações.
+6. Goal 7 (score de conformidade dos documentos).
+7. Goal 2 (refinamentos de agrupamento/correção). **Por enquanto, só backend:** não implemente a UI Streamlit nem o serviço `ui` até nova decisão.
+8. README com como rodar, arquitetura, resultados medidos e limitações.
 
 ## Goals
 
@@ -154,7 +155,7 @@ Demais entregas:
 
 ### Goal 6: Análise de risco das folhas de ponto
 
-Para documentos do tipo `folha_ponto`, encontrar divergências, com foco principal em horas extras, e gerar um score de risco com base na CLT e na Portaria MTP nº 671/2021.
+Para documentos do tipo `folha_ponto`, encontrar divergências, com foco principal em horas extras, e gerar um score de risco com base na CLT e na Portaria MTP nº 671/2021. O score é **por folha**; o consolidado por funcionário fica fora do escopo por enquanto.
 
 **Perfil padrão:** tabela `perfil_jornada`, criada com um perfil CLT de referência. Cada parâmetro guarda o valor e a base legal. Confira os valores no texto oficial da CLT e da Portaria antes de usar:
 
@@ -182,3 +183,34 @@ Para documentos do tipo `folha_ponto`, encontrar divergências, com foco princip
 O score é apoio à auditoria, não parecer jurídico. A convenção coletiva e o acordo de compensação podem alterar os limites do perfil padrão. O README deve registrar as duas ressalvas.
 
 **Aceite:** uma folha de ponto com horas extras acima do limite gera divergências com data, minutos e base legal, além do score; uma folha regular gera score menor. Não reporte métrica de acurácia sem um gabarito de divergências.
+
+### Goal 7: Score de conformidade dos documentos
+
+Score de 0 a 100 **por lote**, tratando cada lote como o dossiê de uma pessoa. É separado do risco de ponto do Goal 6, que não entra nesta nota. Fica nos 7 tipos atuais. O cálculo é feito em código determinístico; os LLMs só extraem os dados.
+
+| Critério | Peso | Regra | Nota do critério |
+|---|---|---|---|
+| Completude | 40% | Todos os documentos obrigatórios foram enviados | Obrigatórios presentes / obrigatórios |
+| Validade | 35% | Documentos vencidos ou dentro da validade | Válidos / analisados com regra de validade |
+| Consistência | 25% | Divergências nas informações entre documentos | Campos coerentes / campos comparados |
+
+**Classificação:** 85–100 Regular; 65–84 Atenção; 0–64 Crítico.
+
+**Regras:**
+
+- Documento ausente reduz a pontuação.
+- Documento vencido reduz a pontuação.
+- Divergências são sinalizadas para conferência e reduzem a nota de Consistência.
+- Documento não analisado (`segmentado`, `em_revisao`, `erro` ou com tipo `desconhecido`) fica pendente, sem nota zero automática. Enquanto houver documento de tipo não identificado, um obrigatório faltante conta como pendente, não como ausente.
+- Critério sem nada analisável fica pendente, e seu peso é redistribuído entre os demais. Nesse caso, ou quando houver pendências, o score é marcado como `provisorio`. Sem nenhum critério analisável, não há score.
+- O score mostra o motivo de cada desconto: critério, documento, regra e pontos descontados.
+- A correção humana entra no cálculo: o score é recalculado a partir do estado atual dos documentos.
+
+**Configuração, em um único módulo:** pesos, faixas, tipos obrigatórios e regras de validade.
+
+- Obrigatórios: `aso`, `contrato_trabalho`, `holerite`, `folha_pagamento` e `folha_ponto`. `atestado_medico` e `recibo_ferias` só existem quando há afastamento ou férias, então não contam como ausência.
+- Validade: `aso` e `contrato_trabalho` por prazo determinado. Confira o prazo do ASO na NR-7. Documento sem data legível fica pendente. A data de referência é registrada no resultado.
+
+**Fluxo:** o Gemini extrai datas e campos de identificação (nome, CPF, matrícula, data de admissão) em JSON. O código normaliza, compara e calcula. Conferências de texto ambíguas, como variação de nome, podem usar `Noul` do Jev, seguindo a skill. Os dados extraídos ficam em `documento_campos`, e `GET /lotes/{id}/conformidade` devolve a nota por critério, o score, a classificação, os descontos e as pendências.
+
+**Aceite:** testes cobrem cada regra e cada limite de faixa; em um lote sintético, a remoção de um obrigatório, um ASO vencido e um nome divergente geram os descontos esperados com o motivo; documento pendente não zera a nota. Não reporte métrica de acurácia sem gabarito.
