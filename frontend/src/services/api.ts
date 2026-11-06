@@ -1,4 +1,5 @@
 import type { Company } from '../types';
+import type { AnalisePonto } from '../components/auditoriaPonto';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 const API_PREFIX = import.meta.env.VITE_API_PREFIX ?? '';
@@ -80,6 +81,12 @@ export interface LoteResponse {
   empresa_id?: number | null;
 }
 
+export interface PaginaDocumentoResponse {
+  numero: number;
+  imagem_url: string;
+  texto: string;
+}
+
 export interface DocumentoResponse {
   id: number;
   lote_id?: number;
@@ -98,6 +105,8 @@ export interface DocumentoResponse {
   nome_arquivo?: string;
   n_paginas?: number;
   processado_em?: string;
+  /** Só vem no detalhe (GET /documentos/{id}), não nas listas. */
+  paginas?: PaginaDocumentoResponse[];
 }
 
 export interface GrupoDocumentoResponse {
@@ -144,54 +153,7 @@ export interface SearchResult {
   nome_arquivo: string;
 }
 
-export interface DivergenciaPontoResponse {
-  tipo?: string;
-  data?: string | null;
-  minutos?: number | null;
-  base_legal?: string;
-  detalhe?: string;
-  evidencia?: string;
-  campo?: string;
-}
-
-export interface ScoreDimensaoPonto {
-  score?: number;
-  confianca?: number;
-  n_niveis?: number;
-  normalizado?: number | null;
-  indeterminada?: boolean;
-}
-
-export interface TotaisPontoResponse {
-  trabalhado_min?: number;
-  extras_min?: number;
-  extras_bruto_min?: number;
-  noturno_real_min?: number;
-  noturno_computado_min?: number;
-  dias_validos?: number;
-  dias_invalidos?: number;
-}
-
-export interface PontoBritanicoResponse {
-  conclusivo?: boolean;
-  sinal_risco?: boolean | null;
-  dias?: number;
-  fracao_uniforme?: number | null;
-}
-
-export interface AnalisePontoResponse {
-  documento_id: number;
-  estado: 'pendente' | 'concluida' | 'erro' | string;
-  erro?: string | null;
-  score_geral?: number | null;
-  requer_revisao?: boolean;
-  scores_dimensao?: Record<string, ScoreDimensaoPonto> | null;
-  totais?: TotaisPontoResponse | null;
-  ponto_britanico?: PontoBritanicoResponse | null;
-  intervalo_pre_assinalado?: boolean | null;
-  divergencias?: DivergenciaPontoResponse[] | null;
-  analise?: string | null;
-}
+export type AnalisePontoResponse = AnalisePonto;
 
 export interface RevisaoResultResponse {
   id: number;

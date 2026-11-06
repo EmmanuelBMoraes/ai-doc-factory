@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Clock, Info, X } from 'lucide-react'
-import { apiService, fetchPageImage } from '../services/api'
+import { apiService, fetchPageImage, type PaginaDocumentoResponse } from '../services/api'
 import {
   ORDEM_DIMENSOES,
   ROTULO_DIMENSAO,
@@ -27,9 +27,7 @@ interface Props {
   onClose: () => void
 }
 
-interface PaginaDoc {
-  numero: number
-}
+type PaginaDoc = PaginaDocumentoResponse
 
 const COR_FUNDO: Record<NivelRisco, string> = {
   baixo: 'bg-emerald-500',
@@ -189,8 +187,10 @@ const PaginaImagem: React.FC<{ documentoId: number }> = ({ documentoId }) => {
     let ativo = true
     apiService
       .getDocumentDetails(documentoId)
-      .then((d: { lote_id: number; paginas: PaginaDoc[] }) => {
-        if (ativo) setInfo({ loteId: d.lote_id, paginas: d.paginas })
+      .then((d) => {
+        if (!ativo) return
+        if (d.lote_id === undefined || !d.paginas) setFalhou(true)
+        else setInfo({ loteId: d.lote_id, paginas: d.paginas })
       })
       .catch(() => {
         if (ativo) setFalhou(true)
@@ -283,7 +283,7 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
     let ativo = true
     apiService
       .getAnalisePonto(documentoId)
-      .then((a: AnalisePonto) => {
+      .then((a) => {
         if (ativo) setAnalise(a)
       })
       .catch((e: unknown) => {
