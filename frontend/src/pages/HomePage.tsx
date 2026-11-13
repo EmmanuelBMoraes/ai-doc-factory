@@ -9,7 +9,8 @@ import type { DocumentCategory, Company } from '../types'
 
 interface HomePageProps {
   reviewCount: number
-  onOpenReview: () => void
+  /** Ausente para quem não pode revisar (tomador): o aviso de revisão não aparece. */
+  onOpenReview?: () => void
   classifiedCount: number
   accuracyPercentage: number
   categorySearch: string
@@ -48,7 +49,7 @@ const HomePage: React.FC<HomePageProps> = ({
       </section>
 
       {/* Manual Review Attention Banner */}
-      {reviewCount > 0 && (
+      {reviewCount > 0 && onOpenReview && (
         <section>
           <ManualReviewBanner
             count={reviewCount}

@@ -14,6 +14,7 @@ import { useLotePolling } from './hooks/useLotePolling'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse, type UsuarioAtual } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
+import { podeEditar, podeEnviar, veConformidade, veOrganizacoes } from './utils/permissoes'
 
 function formatDatePtBr(isoString?: string | null): string {
   if (!isoString) return new Date().toLocaleDateString('pt-BR')
@@ -126,7 +127,8 @@ export function App() {
 
   // Fetch data from backend
   const fetchData = useCallback(async (silent: boolean = false) => {
-    if (!isAuthenticated) return
+    // Sem o nível do usuário não se sabe quais rotas chamar (as de conformidade são só da plataforma)
+    if (!isAuthenticated || !usuario) return
     if (!silent) {
       setIsLoading(true)
       setError(null)
@@ -134,7 +136,7 @@ export function App() {
     try {
       const [tiposData, empresasData, docsAgrupados, reviewData, docsComErro] = await Promise.all([
         apiService.getTipos(),
-        apiService.getEmpresas(),
+        veConformidade(usuario) ? apiService.getEmpresas() : Promise.resolve([] as Company[]),
         apiService.getDocumentosAgrupados(undefined, false),
         apiService.getReviewQueue(),
         apiService.getDocumentosAgrupados(undefined, true),
@@ -297,7 +299,7 @@ export function App() {
         setIsLoading(false)
       }
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, usuario])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -307,19 +309,23 @@ export function App() {
       .then((u) => {
         if (!cancelado) setUsuario(u)
       })
-      .catch(() => undefined)
+      .catch((err) => {
+        if (cancelado) return
+        setError(err instanceof Error && err.message ? err.message : 'Não foi possível identificar o usuário.')
+        setIsLoading(false)
+      })
     return () => {
       cancelado = true
     }
   }, [isAuthenticated])
 
   useEffect(() => {
-    if (!isAuthenticated) return
+    if (!isAuthenticated || !usuario) return
     const timer = setTimeout(() => {
       void fetchData(false)
     }, 0)
     return () => clearTimeout(timer)
-  }, [isAuthenticated, fetchData])
+  }, [isAuthenticated, usuario, fetchData])
 
   const toggleTheme = () => {
     setIsDark((prev) => !prev)
@@ -543,7 +549,8 @@ export function App() {
         activeTab={
           currentView === 'revisao' ? 'revisao' : currentView === 'organizacoes' ? 'organizacoes' : 'documentos'
         }
-        showOrganizacoes={usuario?.nivel === 'plataforma'}
+        showOrganizacoes={veOrganizacoes(usuario)}
+        mostrarEnvio={podeEnviar(usuario)}
         onSelectTab={(tab) => {
           if (tab === 'documentos') {
             handleBackToHome()
@@ -623,7 +630,7 @@ export function App() {
             )}
 
             {/* VIEW 2: REVISÃO MANUAL */}
-            {currentView === 'revisao' && (
+            {currentView === 'revisao' && podeEditar(usuario) && (
               <ManualReviewPage
                 documents={reviewPendingDocs}
                 onBack={handleBackToHome}
@@ -632,7 +639,7 @@ export function App() {
               />
             )}
 
-            {currentView === 'organizacoes' && usuario?.nivel === 'plataforma' && (
+            {currentView === 'organizacoes' && veOrganizacoes(usuario) && (
               <OrganizacoesPage onBack={handleBackToHome} />
             )}
 
@@ -640,7 +647,7 @@ export function App() {
             {currentView === 'home' && (
               <HomePage
                 reviewCount={reviewCount}
-                onOpenReview={handleOpenReview}
+                onOpenReview={podeEditar(usuario) ? handleOpenReview : undefined}
                 classifiedCount={classifiedCount}
                 accuracyPercentage={accuracyPercentage}
                 categorySearch={categorySearch}

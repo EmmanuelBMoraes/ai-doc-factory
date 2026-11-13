@@ -15,6 +15,8 @@ interface HeaderProps {
   onSelectTab: (tab: 'documentos' | 'revisao' | 'organizacoes') => void
   /** Só o nível plataforma vê a tela de Organizações. */
   showOrganizacoes?: boolean
+  /** Tomador é somente leitura: sem botão Enviar nem acompanhamento de envios. */
+  mostrarEnvio?: boolean
   globalSearch: string
   onGlobalSearchChange: (value: string) => void
   lotes?: TrackedLote[]
@@ -40,6 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onSelectTab,
   showOrganizacoes = false,
+  mostrarEnvio = true,
   // globalSearch,
   // onGlobalSearchChange,
   lotes = [],
@@ -131,21 +134,23 @@ export const Header: React.FC<HeaderProps> = ({
           */}
 
           {/* Upload Button / Real-time Processing Tracker Bubble */}
-          <ProcessingTrackerPopover
-            lotes={lotes}
-            isOpen={isTrackerOpen}
-            onToggleOpen={onToggleTracker}
-            onMinimize={onMinimizeTracker}
-            onOpenUpload={onOpenUpload}
-            onCancel={onCancelLote}
-            onRetry={onRetryLote}
-            onRecheck={onRecheckLote}
-            onDismiss={onDismissLote}
-            onDismissAcaoErro={onDismissAcaoErroLote}
-            onClearFinished={onClearFinishedLotes}
-            onNavigateCategory={onNavigateCategory}
-            onNavigateReview={onOpenReview}
-          />
+          {mostrarEnvio && (
+            <ProcessingTrackerPopover
+              lotes={lotes}
+              isOpen={isTrackerOpen}
+              onToggleOpen={onToggleTracker}
+              onMinimize={onMinimizeTracker}
+              onOpenUpload={onOpenUpload}
+              onCancel={onCancelLote}
+              onRetry={onRetryLote}
+              onRecheck={onRecheckLote}
+              onDismiss={onDismissLote}
+              onDismissAcaoErro={onDismissAcaoErroLote}
+              onClearFinished={onClearFinishedLotes}
+              onNavigateCategory={onNavigateCategory}
+              onNavigateReview={onOpenReview}
+            />
+          )}
 
           {/* Theme Toggle (Dark / Light) */}
           <button
