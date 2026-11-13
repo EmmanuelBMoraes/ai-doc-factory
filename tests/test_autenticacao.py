@@ -302,7 +302,7 @@ def test_nivel_do_banco_vale_mais_que_o_do_token(banco):
     """Token com claims de plataforma, mas o banco diz tomador: vale o banco."""
     uid = banco.usuario(nivel="tomador", papel="membro", tomador_id=banco.tomador())
     forjado = _jwt(uid, nivel="plataforma", papel="admin", tomador_id=None)
-    assert client.get("/tipos", headers=_com(forjado)).status_code == 403
+    assert client.get("/empresas", headers=_com(forjado)).status_code == 403
     assert client.get("/auth/me", headers=_com(forjado)).json()["nivel"] == "tomador"
 
 
@@ -327,7 +327,7 @@ def test_login_nao_depende_de_auth_usuario_e_auth_senha(banco, monkeypatch):
 
 
 @pytest.mark.parametrize("nivel", ["tomador", "prestador"])
-def test_tomador_e_prestador_veem_me_mas_nao_os_dados(banco, nivel):
+def test_tomador_e_prestador_veem_me_e_tipos_mas_nao_a_conformidade(banco, nivel):
     vinculo = {"tomador_id": banco.tomador()} if nivel == "tomador" else {"prestador_id": banco.prestador()}
     uid = banco.usuario(nivel=nivel, papel="membro", **vinculo)
     token = _token()
@@ -336,8 +336,9 @@ def test_tomador_e_prestador_veem_me_mas_nao_os_dados(banco, nivel):
     corpo = me.json()
     assert corpo["id"] == uid and corpo["nivel"] == nivel
     assert corpo[f"{nivel}_id"] == vinculo[f"{nivel}_id"]
-    r = client.get("/tipos", headers=_com(token))
-    assert r.status_code == 403 and "indisponível" in r.json()["detail"]
+    assert client.get("/tipos", headers=_com(token)).status_code == 200
+    r = client.get("/empresas", headers=_com(token))
+    assert r.status_code == 403 and "plataforma" in r.json()["detail"]
 
 
 def test_health_e_docs_ficam_abertos():
@@ -391,13 +392,25 @@ def test_varredura_toda_rota_exige_token():
     assert client.get("/auth/me").status_code == 401
 
 
+# Rotas só da plataforma: tomador e prestador recebem 403. As demais rotas de dados são abertas aos dois níveis,
+# filtradas pelo escopo (a matriz completa e o isolamento estão em tests/test_isolamento.py).
+SO_PLATAFORMA = {("GET", "/empresas"), ("GET", "/empresas/{cnpj:path}/conformidade"),
+                 ("GET", "/lotes/{lote_id}/conformidade"), ("POST", "/tomadores"), ("GET", "/tomadores"),
+                 ("POST", "/prestadores"), ("GET", "/prestadores"), ("POST", "/contratos")}
+
+
 @pytest.mark.parametrize("nivel", ["tomador", "prestador"])
-def test_varredura_tomador_e_prestador_recebem_403_em_toda_rota_de_dados(banco, nivel):
+def test_varredura_rotas_so_da_plataforma_dao_403_aos_outros_niveis(banco, nivel):
     vinculo = {"tomador_id": banco.tomador()} if nivel == "tomador" else {"prestador_id": banco.prestador()}
     banco.usuario(nivel=nivel, papel="admin", **vinculo)
     token = _token()
-    liberadas = [(m, p, c) for m, p, c in _chamadas(_rotas_de_dados(), _com(token)) if c != 403]
-    assert not liberadas, f"rotas de dados abertas para {nivel}: {liberadas}"
+    resultado = {(m, p): c for m, p, c in _chamadas(_rotas_de_dados(), _com(token))}
+    assert SO_PLATAFORMA <= set(resultado), "SO_PLATAFORMA cita rota que não existe mais"
+    abertas = [(k, c) for k, c in resultado.items() if k in SO_PLATAFORMA and c != 403]
+    assert not abertas, f"rotas só da plataforma abertas para {nivel}: {abertas}"
+    fechadas = [(k, c) for k, c in resultado.items() if k not in SO_PLATAFORMA and c == 403 and
+                not (nivel == "tomador" and k[0] != "GET")]
+    assert not fechadas, f"rotas de dados com 403 indevido para {nivel}: {fechadas}"
 
 
 def test_varredura_inclui_rotas_de_organizacoes():

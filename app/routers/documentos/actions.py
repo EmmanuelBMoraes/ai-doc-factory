@@ -8,10 +8,12 @@ from fastapi import HTTPException
 from app import config
 from app.anonimizacao import mascarar_campos, mascarar_documentos, mascarar_estrutura
 from app.analise import enfileirar_analise
+from app.escopo import condicao_contrato, condicao_lote
 from app.eventos import limpar_cancelado
 from app.extracao import enfileirar_extracao
 from app.renomeacao import atualizar_nome_padronizado, gerar_nome_padronizado
 from app.routers import r
+from app.routers.auth.actions import UsuarioContexto
 from app.routers.documentos.schemas import AtualizacaoCampos
 from app.routers.revisao.schemas import Revisao
 
@@ -97,9 +99,14 @@ def obter_analise_ponto(documento_id: int) -> dict:
 SEM_TIPO = "sem_tipo"
 
 
-def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None) -> dict:
-    """Documentos agrupados pelo campo `tipo` (uma consulta só). Falha = estado 'erro'."""
+def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None, *,
+                      usuario: UsuarioContexto) -> dict:
+    """Documentos agrupados pelo campo `tipo` (uma consulta só). Falha = estado 'erro'.
+    `usuario` é obrigatório: o filtro de escopo vai no SQL; contrato_id fora do escopo é 404, como o inexistente."""
     condicoes, args = [], []
+    cond, cargs = condicao_lote(usuario)
+    condicoes.append(cond)
+    args.extend(cargs)
     if contrato_id is not None:
         condicoes.append("l.contrato_id = %s")
         args.append(contrato_id)
@@ -109,9 +116,12 @@ def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None
         condicoes.append("d.estado <> 'erro'")
     where = f"WHERE {' AND '.join(condicoes)}" if condicoes else ""
     with psycopg.connect(config.DATABASE_URL) as conn:
-        if contrato_id is not None and conn.execute(
-                "SELECT 1 FROM contrato WHERE id = %s", (contrato_id,)).fetchone() is None:
-            raise HTTPException(404, "contrato não encontrado")
+        if contrato_id is not None:
+            ccond, cargs = condicao_contrato(usuario)
+            if conn.execute("SELECT 1 FROM contrato c JOIN tomador t ON t.id = c.tomador_id "
+                            f"JOIN prestador p ON p.id = c.prestador_id WHERE c.id = %s AND {ccond}",
+                            [contrato_id, *cargs]).fetchone() is None:
+                raise HTTPException(404, "contrato não encontrado")
         rows = conn.execute(
             "SELECT d.id, d.lote_id, d.ordem, d.pagina_ini, d.pagina_fim, d.estado, d.tipo, d.confianca, "
             f"l.contrato_id, l.nome_arquivo, l.criado_em, d.nome_padronizado FROM documento d JOIN lote l ON l.id = d.lote_id {where} "

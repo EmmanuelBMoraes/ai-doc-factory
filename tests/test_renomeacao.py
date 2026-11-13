@@ -150,6 +150,7 @@ def test_limpar_extracao_valida_competencia_e_tipo_exame():
 def test_rota_download_documento_retorna_pdf_e_content_disposition(monkeypatch):
     from fastapi.testclient import TestClient
     from app.api import app
+    from app.escopo import documento_para_leitura
     from app.routers.documentos import actions as doc_actions
 
     monkeypatch.setattr(
@@ -158,7 +159,11 @@ def test_rota_download_documento_retorna_pdf_e_content_disposition(monkeypatch):
         lambda doc_id: (b"%PDF-1.4\n%mock\n", "holerite_douglas_paz_2026-03.pdf"),
     )
     client = TestClient(app)
-    resp = client.get("/documentos/123/download")
+    app.dependency_overrides[documento_para_leitura] = lambda: 123  # o documento 123 não existe no banco
+    try:
+        resp = client.get("/documentos/123/download")
+    finally:
+        app.dependency_overrides.pop(documento_para_leitura, None)
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/pdf"
     assert resp.headers["content-disposition"] == 'attachment; filename="holerite_douglas_paz_2026-03.pdf"'

@@ -4,19 +4,23 @@ from fastapi import HTTPException
 from app import config
 from app.analise import enfileirar_analise
 from app.eventos import limpar_cancelado
+from app.escopo import condicao_lote
 from app.extracao import enfileirar_extracao
 from app.renomeacao import atualizar_nome_padronizado
 from app.routers import r
+from app.routers.auth.actions import UsuarioContexto
 from app.routers.documentos.actions import campos_por_documento, extras_documento
 from app.routers.revisao.schemas import Revisao
 
 
-def fila_revisao() -> list[dict]:
+def fila_revisao(usuario: UsuarioContexto) -> list[dict]:
+    """Fila só dos lotes no escopo de `usuario` (obrigatório)."""
+    cond, cargs = condicao_lote(usuario)
     with psycopg.connect(config.DATABASE_URL) as conn:
         docs = conn.execute(
             "SELECT d.id, d.lote_id, d.tipo, d.confianca, d.motivo_revisao, d.pagina_ini, d.pagina_fim, "
             "l.nome_arquivo, l.criado_em FROM documento d JOIN lote l ON l.id = d.lote_id "
-            "WHERE d.estado = 'em_revisao' ORDER BY d.lote_id, d.ordem"
+            f"WHERE d.estado = 'em_revisao' AND {cond} ORDER BY d.lote_id, d.ordem", cargs
         ).fetchall()
         campos = campos_por_documento(conn, [d[0] for d in docs])
     return [
