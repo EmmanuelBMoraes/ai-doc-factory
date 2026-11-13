@@ -148,8 +148,8 @@ export const Header: React.FC<HeaderProps> = ({
               onDismissAcaoErro={onDismissAcaoErroLote}
               onClearFinished={onClearFinishedLotes}
               onNavigateCategory={onNavigateCategory}
-                onNavigateReview={onOpenReview}
-          />
+              onNavigateReview={onOpenReview}
+            />
           )}
 
           {/* Theme Toggle (Dark / Light) */}
