@@ -26,6 +26,7 @@ class ExtrasDocumentoOut(BaseModel):
     campos: dict[str, str]
     pessoa: str | None  # campo 'nome' extraído
     nome_arquivo: str
+    nome_original: str | None = None
     n_paginas: int
     processado_em: DataHora  # criação do lote
 
@@ -63,7 +64,7 @@ class DocumentoListadoOut(ExtrasDocumentoOut):
     estado: str
     tipo: str | None
     confianca: float | None
-    empresa_id: int | None
+    contrato_id: int | None
 
 
 class GrupoDocumentosOut(BaseModel):

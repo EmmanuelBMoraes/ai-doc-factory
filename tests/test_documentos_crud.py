@@ -13,24 +13,18 @@ client = TestClient(app)
 
 
 @pytest.fixture
-def banco(extracoes, monkeypatch):
+def banco(extracoes, monkeypatch, orgs):
     analises = []
     monkeypatch.setattr(actions, "enfileirar_analise", lambda doc_id, cliente=None: analises.append(doc_id))
     conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
-    lotes, empresas = [], []
+    lotes = []
 
-    def empresa():
-        e = conn.execute("INSERT INTO empresa (nome) VALUES (%s) RETURNING id",
-                         (f"Emp {uuid.uuid4().hex}",)).fetchone()[0]
-        empresas.append(e)
-        return e
-
-    def lote(docs, estado="concluido", empresa_id=None):
+    def lote(docs, estado="concluido", contrato_id=None):
         """docs: lista de (estado, tipo). Devolve (lote_id, [documento_id])."""
         lid = conn.execute(
-            "INSERT INTO lote (sha256, nome_arquivo, estado, docs_pendentes, empresa_id) "
+            "INSERT INTO lote (sha256, nome_arquivo, estado, docs_pendentes, contrato_id) "
             "VALUES (%s, 't.pdf', %s, 0, %s) RETURNING id",
-            (uuid.uuid4().hex + uuid.uuid4().hex, estado, empresa_id)).fetchone()[0]
+            (uuid.uuid4().hex + uuid.uuid4().hex, estado, contrato_id)).fetchone()[0]
         lotes.append(lid)
         ids = []
         for n, (est, tipo) in enumerate(docs, start=1):
@@ -42,9 +36,8 @@ def banco(extracoes, monkeypatch):
             ids.append(i)
         return lid, ids
 
-    yield conn, lote, empresa, extracoes, analises
+    yield conn, lote, orgs.contrato, extracoes, analises
     conn.execute("DELETE FROM lote WHERE id = ANY(%s)", (lotes,))
-    conn.execute("DELETE FROM empresa WHERE id = ANY(%s)", (empresas,))
     conn.close()
 
 
@@ -54,54 +47,54 @@ def _ids(resp):
 
 # ---------- GET /documentos ----------
 
-def test_listar_por_empresa_agrupa_e_ordena(banco):
-    _, lote, empresa, _, _ = banco
-    e = empresa()
-    l1, (a, b, c, d) = lote([("classificado", "holerite"), ("classificado", "aso"),
-                             ("em_revisao", "desconhecido"), ("segmentado", None)], empresa_id=e)
-    l2, (x,) = lote([("classificado", "aso")], empresa_id=e)
-    lote([("classificado", "aso")])  # lote sem empresa: não deve aparecer
-    r = client.get("/documentos", params={"empresa_id": e})
+def test_listar_por_contrato_agrupa_e_ordena(banco):
+    _, lote, contrato, _, _ = banco
+    c = contrato()
+    l1, (a, b, desc, d) = lote([("classificado", "holerite"), ("classificado", "aso"),
+                             ("em_revisao", "desconhecido"), ("segmentado", None)], contrato_id=c)
+    l2, (x,) = lote([("classificado", "aso")], contrato_id=c)
+    lote([("classificado", "aso")])  # lote sem contrato: não deve aparecer
+    r = client.get("/documentos", params={"contrato_id": c})
     assert r.status_code == 200
     grupos = r.json()["grupos"]
     assert [g["tipo"] for g in grupos] == ["aso", "holerite", "desconhecido", "sem_tipo"]
     assert [g["total"] for g in grupos] == [2, 1, 1, 1]
-    assert _ids(r) == {"aso": [b, x], "holerite": [a], "desconhecido": [c], "sem_tipo": [d]}
+    assert _ids(r) == {"aso": [b, x], "holerite": [a], "desconhecido": [desc], "sem_tipo": [d]}
     assert set(grupos[0]["documentos"][0]) >= {"id", "lote_id", "ordem", "pagina_ini", "pagina_fim", "estado",
-                                               "tipo", "confianca", "empresa_id"}
-    assert grupos[0]["documentos"][0]["empresa_id"] == e
+                                               "tipo", "confianca", "contrato_id"}
+    assert grupos[0]["documentos"][0]["contrato_id"] == c
 
 
 def test_listar_sem_filtro_inclui_todos(banco):
-    _, lote, empresa, _, _ = banco
+    _, lote, contrato, _, _ = banco
     _, (a,) = lote([("erro", None)])
-    _, (b,) = lote([("classificado", "aso")], empresa_id=empresa())
+    _, (b,) = lote([("classificado", "aso")], contrato_id=contrato())
     r = client.get("/documentos")
     todos = {d["id"] for g in r.json()["grupos"] for d in g["documentos"]}
     assert {a, b} <= todos
 
 
 def test_listar_ordem_dos_tipos_segue_config(banco):
-    _, lote, empresa, _, _ = banco
-    e = empresa()
-    lote([("classificado", t) for t in reversed(config.TIPOS)], empresa_id=e)
-    r = client.get("/documentos", params={"empresa_id": e})
+    _, lote, contrato, _, _ = banco
+    c = contrato()
+    lote([("classificado", t) for t in reversed(config.TIPOS)], contrato_id=c)
+    r = client.get("/documentos", params={"contrato_id": c})
     assert [g["tipo"] for g in r.json()["grupos"]] == list(config.TIPOS)
 
 
-def test_listar_empresa_inexistente_404(banco):
-    assert client.get("/documentos", params={"empresa_id": 999999999}).status_code == 404
+def test_listar_contrato_inexistente_404(banco):
+    assert client.get("/documentos", params={"contrato_id": 999999999}).status_code == 404
 
 
 def test_listar_falhou(banco):
-    _, lote, empresa, _, _ = banco
-    e = empresa()
-    _, (ok, ruim) = lote([("classificado", "aso"), ("erro", None)], empresa_id=e)
-    r = client.get("/documentos", params={"empresa_id": e, "falhou": "true"})
+    _, lote, contrato, _, _ = banco
+    c = contrato()
+    _, (ok, ruim) = lote([("classificado", "aso"), ("erro", None)], contrato_id=c)
+    r = client.get("/documentos", params={"contrato_id": c, "falhou": "true"})
     assert _ids(r) == {"sem_tipo": [ruim]}
-    r = client.get("/documentos", params={"empresa_id": e, "falhou": "false"})
+    r = client.get("/documentos", params={"contrato_id": c, "falhou": "false"})
     assert _ids(r) == {"aso": [ok]}
-    r = client.get("/documentos", params={"empresa_id": e})
+    r = client.get("/documentos", params={"contrato_id": c})
     assert _ids(r) == {"aso": [ok], "sem_tipo": [ruim]}
 
 

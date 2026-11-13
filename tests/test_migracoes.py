@@ -14,8 +14,12 @@ from psycopg import sql
 from app import config
 
 RAIZ = Path(__file__).resolve().parent.parent
-TABELAS = {"empresa", "lote", "documento", "pagina", "perfil_jornada", "analise_ponto", "documento_campos"}
+TABELAS_SEM_EMPRESA = {"lote", "documento", "pagina", "perfil_jornada", "analise_ponto", "documento_campos"}
+TABELAS = TABELAS_SEM_EMPRESA | {"empresa"}  # 0001_baseline
 TABELAS_ACESSO = {"tomador", "prestador", "contrato", "usuario"}  # migração 0002
+# migração 0004: `empresa` sai, `lote` ganha `contrato_id`
+TABELAS_0004 = TABELAS_SEM_EMPRESA | TABELAS_ACESSO
+TABELAS_HEAD = TABELAS_0004 | {"convite"}  # migração 0005
 
 
 @pytest.fixture
@@ -47,19 +51,64 @@ def _tabelas(url):
     return {r[0] for r in rows} - {"alembic_version"}
 
 
+def _colunas_lote(url):
+    with psycopg.connect(url) as conn:
+        rows = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'lote'").fetchall()
+    return {r[0] for r in rows}
+
+
+def _indices_lote(url):
+    with psycopg.connect(url) as conn:
+        rows = conn.execute("SELECT indexname FROM pg_indexes WHERE tablename = 'lote'").fetchall()
+    return {r[0] for r in rows}
+
+
 def test_upgrade_head_cria_tabelas_e_downgrade_base_remove(banco_descartavel):
     url = banco_descartavel
     _alembic(url, "upgrade", "head")
-    assert _tabelas(url) == TABELAS | TABELAS_ACESSO
+    assert _tabelas(url) == TABELAS_HEAD  # sem `empresa`
+    assert "contrato_id" in _colunas_lote(url) and "empresa_id" not in _colunas_lote(url)
+    assert {"lote_contrato_sha256_uniq", "lote_sem_contrato_sha256_uniq"} <= _indices_lote(url)
+    assert "lote_sha256_key" not in _indices_lote(url)
     with psycopg.connect(url) as conn:
         assert conn.execute("SELECT count(*) FROM perfil_jornada WHERE perfil = 'clt_padrao'").fetchone()[0] == 16
         assert conn.execute(
             "SELECT count(*) FROM pg_indexes WHERE indexname IN ('pagina_texto_fts_idx', 'empresa_nome_uniq')"
-        ).fetchone()[0] == 2
+        ).fetchone()[0] == 1  # empresa_nome_uniq saiu com a tabela
     _alembic(url, "upgrade", "head")  # idempotente: já está no head
+    _alembic(url, "downgrade", "0004_lote_contrato")  # 0005 só cria `convite`
+    assert _tabelas(url) == TABELAS_0004
+    _alembic(url, "upgrade", "head")
+    assert _tabelas(url) == TABELAS_HEAD
+    _alembic(url, "downgrade", "0002_modelo_acesso")  # recria `empresa` (vazia) e restaura o UNIQUE de sha256
+    assert _tabelas(url) == TABELAS | TABELAS_ACESSO
+    assert "empresa_id" in _colunas_lote(url) and "contrato_id" not in _colunas_lote(url)
+    assert "lote_sha256_key" in _indices_lote(url)
     _alembic(url, "downgrade", "0001_baseline")  # remove só as tabelas do modelo de acesso
     assert _tabelas(url) == TABELAS
     _alembic(url, "upgrade", "head")
-    assert _tabelas(url) == TABELAS | TABELAS_ACESSO
+    assert _tabelas(url) == TABELAS_HEAD
     _alembic(url, "downgrade", "base")
     assert _tabelas(url) == set()
+
+
+def test_downgrade_recusa_mesmo_arquivo_em_dois_contratos(banco_descartavel):
+    """O downgrade não apaga lote: com o mesmo sha256 em contratos diferentes ele falha com mensagem clara."""
+    url = banco_descartavel
+    _alembic(url, "upgrade", "head")
+    with psycopg.connect(url, autocommit=True) as conn:
+        t = conn.execute("INSERT INTO tomador (nome) VALUES ('T') RETURNING id").fetchone()[0]
+        c = []
+        for cnpj in ("11222333000181", "12345678000195"):
+            p = conn.execute("INSERT INTO prestador (cnpj, razao_social) VALUES (%s, 'P') RETURNING id",
+                             (cnpj,)).fetchone()[0]
+            c.append(conn.execute("INSERT INTO contrato (tomador_id, prestador_id) VALUES (%s, %s) RETURNING id",
+                                  (t, p)).fetchone()[0])
+        for contrato in c:
+            conn.execute("INSERT INTO lote (sha256, nome_arquivo, contrato_id) VALUES (%s, 'a.pdf', %s)",
+                         ("a" * 64, contrato))
+    with pytest.raises(subprocess.CalledProcessError) as erro:
+        _alembic(url, "downgrade", "0002_modelo_acesso")
+    assert "downgrade impossível" in erro.value.stderr
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT count(*) FROM lote").fetchone()[0] == 2  # nada foi apagado

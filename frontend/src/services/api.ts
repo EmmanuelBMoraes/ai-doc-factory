@@ -41,6 +41,26 @@ export const fetchPageImage = async (loteId: number, pagina: number, signal?: Ab
   return response.blob();
 };
 
+/** Baixa o PDF recortado do documento com o nome padronizado. */
+export const downloadDocumento = async (documentoId: number, fallbackFilename: string): Promise<void> => {
+  const response = await authFetch(`/documentos/${documentoId}/download`);
+  if (!response.ok) {
+    throw new Error('Falha ao baixar documento');
+  }
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="([^"]+)"/i);
+  const filename = match?.[1] || fallbackFilename;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 export interface LoginResponse {
   access_token: string;
   token_type: string;
@@ -68,6 +88,47 @@ export const login = async (usuario: string, senha: string): Promise<LoginRespon
   return data;
 };
 
+/**
+ * Rotas públicas do convite: sem Authorization e sem authFetch (um 404 aqui é convite inválido e
+ * um 401 nunca deve derrubar uma sessão). O token vai no caminho; nunca é logado nem guardado.
+ */
+export const consultarConvite = async (token: string): Promise<ConvitePublico | null> => {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/convites/${encodeURIComponent(token)}`);
+  } catch {
+    throw new Error('Não foi possível conectar ao servidor.');
+  }
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await parseErrorMessage(response, 'Erro ao consultar o convite.'));
+  return response.json();
+};
+
+/** Aceita o convite e já guarda o token de login (mesmo formato do /auth/login). */
+export const aceitarConvite = async (token: string, nome: string, senha: string): Promise<LoginResponse> => {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/convites/${encodeURIComponent(token)}/aceitar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome, senha }),
+    });
+  } catch {
+    throw new Error('Não foi possível conectar ao servidor.');
+  }
+  if (response.status === 404) throw new ConviteInvalidoError();
+  if (!response.ok) throw new Error(await parseErrorMessage(response, 'Erro ao criar o acesso.'));
+  const data: LoginResponse = await response.json();
+  authToken.set(data.access_token);
+  return data;
+};
+
+export class ConviteInvalidoError extends Error {
+  constructor() {
+    super('Este convite não é válido, já foi usado ou expirou. Peça um novo a quem te convidou.');
+  }
+}
+
 export interface TipoDocumentoResponse {
   slug: string;
   nome: string;
@@ -78,7 +139,7 @@ export interface LoteResponse {
   lote_id: number;
   estado: string;
   existente: boolean;
-  empresa_id?: number | null;
+  contrato_id?: number | null;
 }
 
 export interface DocumentoResponse {
@@ -93,10 +154,11 @@ export interface DocumentoResponse {
   segmentacao_ambigua?: boolean;
   probabilidades?: Record<string, number> | null;
   tipo_original?: string | null;
-  empresa_id?: number | null;
+  contrato_id?: number | null;
   campos?: Record<string, string>;
   pessoa?: string | null;
   nome_arquivo?: string;
+  nome_original?: string;
   n_paginas?: number;
   processado_em?: string;
   paginas: { numero: number; imagem_url?: string; texto_ocr?: string | null }[];
@@ -131,7 +193,7 @@ export interface LoteStatusResponse {
   nome_arquivo: string;
   estado: string;
   docs_pendentes: number;
-  empresa_id?: number | null;
+  contrato_id?: number | null;
   documentos: DocumentoResponse[];
   ultimo_evento?: LoteEventoProgresso | null;
   historico_eventos?: LoteEventoProgresso[];
@@ -222,22 +284,119 @@ export interface RevisaoResultResponse {
   revisado_em: string;
 }
 
-export interface CadastroEmpresaResponse {
+export interface UsuarioAtual {
+  id: number;
+  email: string;
+  nome: string;
+  nivel: string; // 'plataforma' | 'tomador' | 'prestador'
+  papel: string;
+  tomador_id: number | null;
+  prestador_id: number | null;
+}
+
+export interface Tomador {
   id: number;
   nome: string;
+  cnpj: string | null;
+  ativo: boolean;
   criado_em: string;
-  n_lotes: number;
-  n_documentos: number;
-  lotes: { id: number; nome_arquivo: string; estado: string }[];
-  documentos: {
-    id: number;
-    lote_id: number;
-    ordem: number;
-    pagina_ini: number;
-    pagina_fim: number;
-    tipo: string | null;
-    estado: string;
-  }[];
+}
+export interface NovoTomador {
+  nome: string;
+  cnpj?: string | null;
+}
+
+export interface Prestador {
+  id: number;
+  cnpj: string;
+  razao_social: string;
+  ativo: boolean;
+  criado_em: string;
+}
+export interface NovoPrestador {
+  cnpj: string;
+  razao_social: string;
+}
+
+export interface Contrato {
+  id: number;
+  tomador_id: number;
+  prestador_id: number;
+  ativo: boolean;
+  vigencia_inicio: string | null;
+  vigencia_fim: string | null;
+  criado_em: string;
+  tomador_nome: string;
+  tomador_ativo: boolean;
+  prestador_razao_social: string;
+  prestador_cnpj: string;
+  prestador_ativo: boolean;
+  acesso_prestador?: 'ativo' | 'convite_pendente' | 'sem_acesso';
+}
+export interface NovoContrato {
+  tomador_id: number;
+  prestador_id: number;
+  vigencia_inicio?: string | null;
+  vigencia_fim?: string | null;
+}
+
+export interface NovoConvite {
+  email: string;
+  nivel: 'plataforma' | 'tomador' | 'prestador';
+  papel: 'admin' | 'membro';
+  tomador_id?: number | null;
+  prestador_id?: number | null;
+}
+/** Resposta de POST /convites: o token só existe aqui. */
+export interface ConviteCriado {
+  id: number;
+  email: string;
+  nivel: string;
+  papel: string;
+  expira_em: string;
+  token: string;
+}
+export interface ConviteListado {
+  id: number;
+  email: string;
+  nivel: string;
+  papel: string;
+  tomador_id: number | null;
+  prestador_id: number | null;
+  organizacao_nome: string | null;
+  estado: 'pendente' | 'usado' | 'expirado';
+  criado_por: number | null;
+  criado_em: string;
+  expira_em: string;
+  usado_em: string | null;
+  usuario_id: number | null;
+}
+export interface ConvitePublico {
+  email: string;
+  nivel: string;
+  organizacao_nome: string | null;
+  expira_em: string;
+}
+export interface NovaTerceirizada {
+  cnpj: string;
+  razao_social: string;
+  email: string;
+  tomador_id?: number | null;
+}
+export interface TerceirizadaCadastrada {
+  contrato: { id: number; ativo: boolean };
+  prestador: { id: number; cnpj: string; razao_social: string };
+  acesso: 'convite_criado' | 'convite_pendente' | 'ja_tem_acesso';
+  convite: { id: number; email: string; expira_em: string; token: string } | null;
+}
+export interface UsuarioListado {
+  id: number;
+  nome: string;
+  email: string;
+  nivel: string;
+  papel: string;
+  ativo: boolean;
+  criado_em: string;
 }
 
 async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -277,11 +436,11 @@ export const apiService = {
   /**
    * Faz upload de um arquivo (PDF, JPEG, PNG ou TIFF) para criar um novo lote
    */
-  uploadLote: async (file: File, empresaId?: number): Promise<LoteResponse> => {
+  uploadLote: async (file: File, contratoId?: number | null): Promise<LoteResponse> => {
     const formData = new FormData();
     formData.append('arquivo', file);
-    if (empresaId !== undefined) {
-      formData.append('empresa_id', String(empresaId));
+    if (contratoId !== undefined && contratoId !== null) {
+      formData.append('contrato_id', String(contratoId));
     }
 
     const response = await authFetch(`/lotes`, {
@@ -529,12 +688,12 @@ export const apiService = {
    * Obtém os documentos agrupados por tipo
    */
   getDocumentosAgrupados: async (
-    empresaId?: number,
+    contratoId?: number,
     falhou?: boolean
   ): Promise<DocumentosAgrupadosResponse> => {
     const searchParams = new URLSearchParams();
-    if (empresaId !== undefined) {
-      searchParams.set('empresa_id', String(empresaId));
+    if (contratoId !== undefined) {
+      searchParams.set('contrato_id', String(contratoId));
     }
     if (falhou !== undefined) {
       searchParams.set('falhou', String(falhou));
@@ -580,28 +739,111 @@ export const apiService = {
     return response.json();
   },
 
-  /**
-   * Obtém as empresas cadastradas
-   */
-  getCadastroEmpresas: async (): Promise<CadastroEmpresaResponse[]> => {
-    const response = await authFetch(`/cadastro-empresas`);
+  getTomadores: async (): Promise<Tomador[]> => {
+    const response = await authFetch(`/tomadores`);
     if (!response.ok) {
-      throw new Error(await parseErrorMessage(response, 'Erro ao listar cadastro de empresas'));
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar tomadores'));
     }
     return response.json();
   },
 
-  /**
-   * Cadastra uma nova empresa pelo nome
-   */
-  createCadastroEmpresa: async (nome: string): Promise<CadastroEmpresaResponse> => {
-    const response = await authFetch(`/cadastro-empresas`, {
+  createTomador: async (dados: NovoTomador): Promise<Tomador> => {
+    const response = await authFetch(`/tomadores`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome }),
+      body: JSON.stringify(dados),
     });
     if (!response.ok) {
-      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar empresa'));
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar tomador'));
+    }
+    return response.json();
+  },
+
+  getPrestadores: async (): Promise<Prestador[]> => {
+    const response = await authFetch(`/prestadores`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar prestadores'));
+    }
+    return response.json();
+  },
+
+  createPrestador: async (dados: NovoPrestador): Promise<Prestador> => {
+    const response = await authFetch(`/prestadores`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar prestador'));
+    }
+    return response.json();
+  },
+
+  getContratos: async (): Promise<Contrato[]> => {
+    const response = await authFetch(`/contratos`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar contratos'));
+    }
+    return response.json();
+  },
+
+  createContrato: async (dados: NovoContrato): Promise<Contrato> => {
+    const response = await authFetch(`/contratos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar contrato'));
+    }
+    return response.json();
+  },
+
+  criarConvite: async (dados: NovoConvite): Promise<ConviteCriado> => {
+    const response = await authFetch(`/convites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao criar convite'));
+    }
+    return response.json();
+  },
+
+  getConvites: async (): Promise<ConviteListado[]> => {
+    const response = await authFetch(`/convites`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar convites'));
+    }
+    return response.json();
+  },
+
+  getUsuarios: async (): Promise<UsuarioListado[]> => {
+    const response = await authFetch(`/usuarios`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar usuários'));
+    }
+    return response.json();
+  },
+
+  cadastrarTerceirizada: async (dados: NovaTerceirizada): Promise<TerceirizadaCadastrada> => {
+    const response = await authFetch(`/terceirizadas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar terceirizada'));
+    }
+    return response.json();
+  },
+
+  /** Usuário logado (nível plataforma, tomador ou prestador). */
+  getMe: async (): Promise<UsuarioAtual> => {
+    const response = await authFetch(`/auth/me`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao obter o usuário'));
     }
     return response.json();
   },

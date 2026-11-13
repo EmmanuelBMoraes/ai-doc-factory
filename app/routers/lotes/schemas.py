@@ -4,8 +4,8 @@ from pydantic import BaseModel, ConfigDict
 class LoteCriadoOut(BaseModel):
     lote_id: int
     estado: str
-    existente: bool  # True quando o mesmo arquivo (sha256) já tinha sido enviado
-    empresa_id: int | None
+    existente: bool  # True quando o mesmo arquivo (sha256) já tinha sido enviado no mesmo contrato (ou sem contrato)
+    contrato_id: int | None
     reprocessando: bool | None = None  # só no reenvio de um lote em 'erro' (volta para 'recebido')
 
 
@@ -44,7 +44,7 @@ class LoteOut(BaseModel):
     nome_arquivo: str
     estado: str
     docs_pendentes: int
-    empresa_id: int | None
+    contrato_id: int | None
     documentos: list[DocumentoDoLoteOut]
     ultimo_evento: EventoProgressoOut | None = None  # None sem eventos no Redis (TTL ou lote antigo)
     historico_eventos: list[EventoProgressoOut] = []

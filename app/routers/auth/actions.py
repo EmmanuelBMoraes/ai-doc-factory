@@ -71,7 +71,12 @@ def login(identificador: str, senha: str) -> dict:
             # Condição no hash antigo: não sobrescreve uma troca de senha feita no meio do caminho.
             conn.execute("UPDATE usuario SET senha_hash = %s WHERE id = %s AND senha_hash = %s",
                          (senhas.gerar_hash(senha), linha[0], hash_gravado))
-    usuario = _contexto(linha)
+    return emitir_token(_contexto(linha))
+
+
+def emitir_token(usuario: UsuarioContexto) -> dict:
+    """JWT no formato de /auth/login para um usuário já autenticado (login e aceite de convite)."""
+    _exigir_configuracao()
     agora = datetime.now(timezone.utc)
     expira = agora + timedelta(minutes=config.AUTH_EXPIRA_MIN)
     claims = {"sub": str(usuario.id), "nivel": usuario.nivel, "papel": usuario.papel,
@@ -104,8 +109,7 @@ def exigir_usuario(credenciais: HTTPAuthorizationCredentials | None = Depends(be
 
 
 def exigir_plataforma(usuario: UsuarioContexto = Depends(exigir_usuario)) -> UsuarioContexto:
-    """Falha fechada até existir o filtro de dados por organização: só a equipe da plataforma acessa os dados."""
+    """Rotas só da equipe da plataforma (criação de organizações, conformidade por empresa)."""
     if usuario.nivel != "plataforma":
-        raise HTTPException(403, "acesso indisponível para este nível de usuário: o acesso de tomadores e "
-                                 "prestadores aos dados ainda não está disponível")
+        raise HTTPException(403, "acesso restrito à plataforma")
     return usuario

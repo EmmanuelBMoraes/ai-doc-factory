@@ -1,28 +1,38 @@
 import asyncio
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
+from app.escopo import lote_para_escrita, lote_para_leitura
+from app.routers.auth.actions import UsuarioContexto, exigir_usuario
 from app.routers.lotes import actions
 from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
+from app.routers.organizacoes.schemas import IdBanco
 from app.routers.lotes.validations import converter_para_pdf
 
 router = APIRouter(tags=["Lotes"])
 
 
 @router.post("/lotes", response_model=LoteCriadoOut, response_model_exclude_unset=True)
-def criar_lote(arquivo: UploadFile = File(...), empresa_id: int | None = Form(None)):
-    actions.validar_empresa(empresa_id)  # antes de gravar ou enfileirar qualquer coisa
+def criar_lote(arquivo: UploadFile = File(...), contrato_id: Annotated[IdBanco | None, Form()] = None,
+               usuario: UsuarioContexto = Depends(exigir_usuario)):
+    """`contrato_id`: contrato em que o lote entra. Plataforma: opcional; 404 se não existe, 409 se está inativo.
+    Prestador: obrigatório (422) e tem que ser contrato ativo dele (404 se fora do escopo). Tomador: 403.
+    O mesmo arquivo em contratos diferentes gera lotes diferentes."""
+    actions.validar_contrato(contrato_id, usuario)  # antes de gravar ou enfileirar qualquer coisa
     dados = arquivo.file.read()
     pdf = converter_para_pdf(dados)
-    return actions.criar_lote(dados, pdf, arquivo.filename, empresa_id)
+    return actions.criar_lote(dados, pdf, arquivo.filename, contrato_id)
 
 
-@router.get("/lotes/{lote_id}", response_model=LoteOut, response_model_exclude_unset=True)
+@router.get("/lotes/{lote_id}", response_model=LoteOut, response_model_exclude_unset=True,
+            dependencies=[Depends(lote_para_leitura)])
 def obter_lote(lote_id: int):
     return actions.obter_lote(lote_id)
 
 
-@router.get("/lotes/{lote_id}/eventos")
+@router.get("/lotes/{lote_id}/eventos", dependencies=[Depends(lote_para_leitura)])
 async def eventos_lote(lote_id: int, request: Request, once: bool = False):
     await asyncio.to_thread(actions.obter_lote, lote_id)  # garante 404 imediato sem bloquear o event loop
     return StreamingResponse(
@@ -32,16 +42,16 @@ async def eventos_lote(lote_id: int, request: Request, once: bool = False):
     )
 
 
-@router.post("/lotes/{lote_id}/cancelar")
+@router.post("/lotes/{lote_id}/cancelar", dependencies=[Depends(lote_para_escrita)])
 def cancelar_lote(lote_id: int):
     return actions.cancelar_lote(lote_id)
 
 
-@router.post("/lotes/{lote_id}/reprocessar")
+@router.post("/lotes/{lote_id}/reprocessar", dependencies=[Depends(lote_para_escrita)])
 def reprocessar_lote(lote_id: int):
     return actions.reprocessar_lote(lote_id)
 
 
-@router.get("/lotes/{lote_id}/paginas/{numero}/imagem")
+@router.get("/lotes/{lote_id}/paginas/{numero}/imagem", dependencies=[Depends(lote_para_leitura)])
 def imagem_pagina(lote_id: int, numero: int):
     return FileResponse(actions.caminho_imagem_pagina(lote_id, numero), media_type="image/png")

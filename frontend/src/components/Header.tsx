@@ -11,8 +11,16 @@ interface HeaderProps {
   onOpenUpload: () => void
   onOpenReview: () => void
   reviewCount: number
-  activeTab: 'documentos' | 'revisao'
-  onSelectTab: (tab: 'documentos' | 'revisao') => void
+  activeTab: 'documentos' | 'revisao' | 'organizacoes' | 'terceirizadas' | 'equipe'
+  onSelectTab: (tab: 'documentos' | 'revisao' | 'organizacoes' | 'terceirizadas' | 'equipe') => void
+  /** Só o nível plataforma vê a tela de Organizações. */
+  showOrganizacoes?: boolean
+  /** Administrador do cliente (tomador) cadastra terceirizadas. */
+  showTerceirizadas?: boolean
+  /** Administradores de qualquer nível veem a equipe e convidam colegas. */
+  showEquipe?: boolean
+  /** Tomador é somente leitura: sem botão Enviar nem acompanhamento de envios. */
+  mostrarEnvio?: boolean
   globalSearch: string
   onGlobalSearchChange: (value: string) => void
   lotes?: TrackedLote[]
@@ -37,6 +45,10 @@ export const Header: React.FC<HeaderProps> = ({
   //reviewCount,
   activeTab,
   onSelectTab,
+  showOrganizacoes = false,
+  showTerceirizadas = false,
+  showEquipe = false,
+  mostrarEnvio = true,
   // globalSearch,
   // onGlobalSearchChange,
   lotes = [],
@@ -77,6 +89,48 @@ export const Header: React.FC<HeaderProps> = ({
               Documentos
             </button>
 
+            {showOrganizacoes && (
+              <button
+                type="button"
+                onClick={() => onSelectTab('organizacoes')}
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'organizacoes'
+                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
+                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+                }`}
+              >
+                Organizações
+              </button>
+            )}
+
+            {showTerceirizadas && (
+              <button
+                type="button"
+                onClick={() => onSelectTab('terceirizadas')}
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'terceirizadas'
+                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
+                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+                }`}
+              >
+                Terceirizadas
+              </button>
+            )}
+
+            {showEquipe && (
+              <button
+                type="button"
+                onClick={() => onSelectTab('equipe')}
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'equipe'
+                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
+                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+                }`}
+              >
+                Equipe
+              </button>
+            )}
+
             {/* 
             <button
               type="button"
@@ -114,21 +168,23 @@ export const Header: React.FC<HeaderProps> = ({
           */}
 
           {/* Upload Button / Real-time Processing Tracker Bubble */}
-          <ProcessingTrackerPopover
-            lotes={lotes}
-            isOpen={isTrackerOpen}
-            onToggleOpen={onToggleTracker}
-            onMinimize={onMinimizeTracker}
-            onOpenUpload={onOpenUpload}
-            onCancel={onCancelLote}
-            onRetry={onRetryLote}
-            onRecheck={onRecheckLote}
-            onDismiss={onDismissLote}
-            onDismissAcaoErro={onDismissAcaoErroLote}
-            onClearFinished={onClearFinishedLotes}
-            onNavigateCategory={onNavigateCategory}
-            onNavigateReview={onOpenReview}
-          />
+          {mostrarEnvio && (
+            <ProcessingTrackerPopover
+              lotes={lotes}
+              isOpen={isTrackerOpen}
+              onToggleOpen={onToggleTracker}
+              onMinimize={onMinimizeTracker}
+              onOpenUpload={onOpenUpload}
+              onCancel={onCancelLote}
+              onRetry={onRetryLote}
+              onRecheck={onRecheckLote}
+              onDismiss={onDismissLote}
+              onDismissAcaoErro={onDismissAcaoErroLote}
+              onClearFinished={onClearFinishedLotes}
+              onNavigateCategory={onNavigateCategory}
+              onNavigateReview={onOpenReview}
+            />
+          )}
 
           {/* Theme Toggle (Dark / Light) */}
           <button

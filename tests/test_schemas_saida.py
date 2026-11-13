@@ -25,17 +25,23 @@ from app.routers.auth import actions as auth_actions
 from app.routers.auth.schemas import TokenOut, UsuarioOut
 from app.routers.busca import actions as busca_actions
 from app.routers.busca.schemas import ResultadoBuscaOut
-from app.routers.cadastro_empresas import actions as cad_actions
-from app.routers.cadastro_empresas.schemas import EmpresaOut
+from app.routers.convites import actions as conv_actions
+from app.routers.convites.schemas import ConviteCriadoOut, ConviteOut, ConvitePublicoOut
 from app.routers.documentos import actions as doc_actions
 from app.routers.documentos.schemas import AnalisePontoOut, DocumentoOut, DocumentosAgrupadosOut
 from app.routers.empresas import actions as emp_actions
 from app.routers.empresas.schemas import ConformidadeEmpresaOut, ConformidadeLoteOut, EmpresaResumoOut
 from app.routers.lotes import actions as lote_actions
 from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
+from app.routers.organizacoes import actions as org_actions
+from app.routers.organizacoes.schemas import ContratoOut, PrestadorOut, TomadorOut
 from app.routers.revisao import actions as rev_actions
 from app.routers.revisao.schemas import ItemFilaRevisaoOut, Revisao, RevisaoOut
+from app.routers.terceirizadas import actions as terc_actions
+from app.routers.terceirizadas.schemas import TerceirizadaOut
 from app.routers.tipos import actions as tipos_actions
+from app.routers.usuarios import actions as usu_actions
+from app.routers.usuarios.schemas import UsuarioListadoOut
 from app.routers.tipos.schemas import TipoOut
 
 client = TestClient(app)
@@ -44,6 +50,10 @@ CPF = "52998224725"
 CNPJ_B, CPF_B = "11222333000181", "11144477735"
 MARCACOES = [{"data": "2025-11-03", "pares": [["08:00", "12:00"], ["12:30", "20:30"]]},
              {"data": "2025-11-04", "pares": [["08:00", "12:00"], ["13:00", "17:00"]]}]
+
+# Chamadas diretas às listagens exigem o usuário (sem ele não há filtro de escopo): a plataforma vê tudo.
+PLATAFORMA = auth_actions.UsuarioContexto(id=0, email="plataforma@teste.local", nome="Plataforma", nivel="plataforma",
+                                         papel="admin", tomador_id=None, prestador_id=None)
 
 
 def _crua(valor):
@@ -166,7 +176,7 @@ def test_upload_de_lote():
     lote = r.json()["lote_id"]
     try:
         LoteCriadoOut.model_validate(r.json())
-        assert r.json() == {"lote_id": lote, "estado": "recebido", "existente": False, "empresa_id": None}
+        assert r.json() == {"lote_id": lote, "estado": "recebido", "existente": False, "contrato_id": None}
         r2 = client.post("/lotes", files={"arquivo": ("a.pdf", pdf, "application/pdf")})
         assert r2.json()["existente"] is True and r2.json()["lote_id"] == lote
         assert "reprocessando" not in r2.json()  # chave condicional: ausente fora do reenvio de lote em erro
@@ -191,7 +201,7 @@ def test_reenvio_de_lote_em_erro_devolve_reprocessando(monkeypatch):
         em_erro()
         r = client.post("/lotes", files={"arquivo": ("e.pdf", pdf, "application/pdf")})
         corpo = _confere_resposta("POST /lotes", r, esperado, LoteCriadoOut)
-        assert corpo == {"lote_id": lote, "estado": "recebido", "existente": True, "empresa_id": None,
+        assert corpo == {"lote_id": lote, "estado": "recebido", "existente": True, "contrato_id": None,
                          "reprocessando": True}
     finally:
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
@@ -223,11 +233,11 @@ def test_lote_busca_documentos(cenario):
     assert corpo["documentos"][-1]["confianca"] is None  # segmentado: nulos preservados
 
     achados = _confere("GET /busca", "/busca?q=schemasunico&limite=100", ResultadoBuscaOut,
-                       busca_actions.buscar("schemasunico", 100))
+                       busca_actions.buscar("schemasunico", 100, PLATAFORMA))
     assert {a["documento_id"] for a in achados} >= set(ids)
     assert "529.982.247-25" not in json.dumps(achados)  # anonimização preservada
     assert _confere("GET /busca", "/busca?q=palavrainexistentezzz", ResultadoBuscaOut,
-                    busca_actions.buscar("palavrainexistentezzz", 20)) == []
+                    busca_actions.buscar("palavrainexistentezzz", 20, PLATAFORMA)) == []
 
     doc = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[0]}", DocumentoOut,
                    doc_actions.obter_documento(ids[0]))
@@ -238,17 +248,17 @@ def test_lote_busca_documentos(cenario):
                           doc_actions.obter_documento(ids[4]))
     assert sem_campos["campos"] == {} and sem_campos["pessoa"] is None and sem_campos["confianca"] is None
 
-    grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos())
+    grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos(usuario=PLATAFORMA))
     assert grupos["grupos"]
     _confere("GET /documentos", "/documentos?falhou=true", DocumentosAgrupadosOut,
-             doc_actions.listar_documentos(None, True))
+             doc_actions.listar_documentos(None, True, usuario=PLATAFORMA))
     _confere("GET /documentos", "/documentos?falhou=false", DocumentosAgrupadosOut,
-             doc_actions.listar_documentos(None, False))
+             doc_actions.listar_documentos(None, False, usuario=PLATAFORMA))
 
 
 def test_revisao_e_correcoes(cenario, extracoes):
     lote, ids = cenario
-    fila = _confere("GET /revisao", "/revisao", ItemFilaRevisaoOut, rev_actions.fila_revisao())
+    fila = _confere("GET /revisao", "/revisao", ItemFilaRevisaoOut, rev_actions.fila_revisao(PLATAFORMA))
     assert ids[3] in {i["id"] for i in fila}
 
     r = client.post(f"/documentos/{ids[3]}/revisao", json={"tipo": "atestado_medico", "revisor": "ana"})
@@ -359,19 +369,32 @@ def test_analise_ponto(cenario, monkeypatch):
     assert client.get(f"/documentos/{ids[0]}/analise-ponto").status_code == 404  # não é folha de ponto
 
 
-def test_cadastro_empresas():
-    nome = "Schemas " + uuid.uuid4().hex[:8]
-    r = client.post("/cadastro-empresas", json={"nome": nome})
-    empresa_id = r.json()["id"]
-    try:
-        _confere_resposta("POST /cadastro-empresas", r, cad_actions.obter_empresa(empresa_id), EmpresaOut, status=201)
-        _confere("GET /cadastro-empresas/{empresa_id}", f"/cadastro-empresas/{empresa_id}", EmpresaOut,
-                 cad_actions.obter_empresa(empresa_id))
-        lista = _confere("GET /cadastro-empresas", "/cadastro-empresas", EmpresaOut, cad_actions.listar_empresas())
-        assert nome in {e["nome"] for e in lista}
-    finally:
-        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
-            conn.execute("DELETE FROM empresa WHERE id = %s", (empresa_id,))
+def test_organizacoes(orgs):
+    def achar(itens, id_):
+        return next(i for i in itens if i["id"] == id_)
+    r = client.post("/tomadores", json={"nome": "Schemas " + uuid.uuid4().hex[:8], "cnpj": "11.222.333/0001-81"})
+    tomador = r.json()["id"]
+    orgs.registrar("tomador", tomador)
+    _confere_resposta("POST /tomadores", r, achar(org_actions.listar_tomadores(), tomador), TomadorOut, status=201)
+    lista = _confere("GET /tomadores", "/tomadores", TomadorOut, org_actions.listar_tomadores())
+    assert achar(lista, tomador)["cnpj"] == "11222333000181"
+
+    r = client.post("/prestadores", json={"cnpj": "12345678000195", "razao_social": "Schemas " + uuid.uuid4().hex[:8]})
+    prestador = r.json()["id"]
+    orgs.registrar("prestador", prestador)
+    _confere_resposta("POST /prestadores", r, achar(org_actions.listar_prestadores(), prestador), PrestadorOut,
+                      status=201)
+    _confere("GET /prestadores", "/prestadores", PrestadorOut, org_actions.listar_prestadores())
+
+    r = client.post("/contratos", json={"tomador_id": tomador, "prestador_id": prestador,
+                                        "vigencia_inicio": "2026-01-01"})
+    contrato = r.json()["id"]
+    orgs.registrar("contrato", contrato)
+    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(usuario=PLATAFORMA), contrato), ContratoOut, status=201)
+    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos(usuario=PLATAFORMA))
+    filtrados = _confere("GET /contratos", f"/contratos?tomador_id={tomador}&prestador_id={prestador}", ContratoOut,
+                         org_actions.listar_contratos(tomador, prestador, usuario=PLATAFORMA))
+    assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
 
 def test_auth_login_e_me(auth_real):
@@ -396,12 +419,77 @@ def test_auth_login_e_me(auth_real):
             conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
 
 
+def test_convites(auth_real):
+    import time
+
+    import jwt
+    email = f"schemas-convite-{uuid.uuid4().hex[:8]}@exemplo.invalid"
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        uid = conn.execute("INSERT INTO usuario (email, nome, nivel, papel) VALUES (%s, 'Plat Schemas', 'plataforma', "
+                           "'admin') RETURNING id", (f"plat-{email}",)).fetchone()[0]
+    agora = int(time.time())
+    h = {"Authorization": "Bearer " + jwt.encode({"sub": str(uid), "iat": agora - 5, "exp": agora + 600},
+                                                  config.AUTH_SEGREDO, algorithm="HS256")}
+    try:
+        r = client.post("/convites", headers=h, json={"email": email, "nivel": "plataforma", "papel": "membro"})
+        assert r.status_code == 201
+        token = r.json()["token"]
+        listado = next(c for c in conv_actions.listar(PLATAFORMA) if c["id"] == r.json()["id"])
+        crua = {k: listado[k] for k in ("id", "email", "nivel", "papel", "expira_em")} | {"token": token}
+        _confere_resposta("POST /convites", r, crua, ConviteCriadoOut, status=201)
+        _confere_resposta("GET /convites", client.get("/convites", headers=h), conv_actions.listar(PLATAFORMA), ConviteOut)
+        r = client.get(f"/convites/{token}")
+        _confere_resposta("GET /convites/{token}", r, conv_actions.consultar(token), ConvitePublicoOut)
+        r = client.post(f"/convites/{token}/aceitar", json={"nome": "Pessoa Schemas", "senha": "senha-de-teste-schemas"})
+        contexto = auth_actions.UsuarioContexto(id=0, email=email, nome="x", nivel="plataforma", papel="membro",
+                                                tomador_id=None, prestador_id=None)
+        _confere_resposta("POST /convites/{token}/aceitar", r, auth_actions.emitir_token(contexto), TokenOut,
+                          ignorar=("access_token", "expira_em"))
+        assert r.json()["access_token"] and r.json()["expira_em"]
+    finally:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email,))
+            conn.execute("DELETE FROM usuario WHERE lower(email) IN (%s, %s)", (email, f"plat-{email}"))
+
+
+def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch):
+    sufixo = uuid.uuid4().hex[:8]
+    email_plat, email_conv = f"schemas-plat-{sufixo}@exemplo.invalid", f"schemas-terc-{sufixo}@exemplo.invalid"
+    tomador = orgs.tomador()
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        uid = conn.execute("INSERT INTO usuario (email, nome, nivel, papel) VALUES (%s, 'Plat Schemas', 'plataforma', "
+                           "'admin') RETURNING id", (email_plat,)).fetchone()[0]
+    h = {"Authorization": "Bearer " + auth_actions.emitir_token(auth_actions.UsuarioContexto(
+        id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
+        prestador_id=None))["access_token"]}
+    gravado = []
+    real = terc_actions.cadastrar
+    monkeypatch.setattr(terc_actions, "cadastrar", lambda *a, **k: gravado.append(real(*a, **k)) or gravado[-1])
+    try:
+        r = client.post("/terceirizadas", headers=h, json={
+            "cnpj": "11.222.333/0001-81", "razao_social": "Schemas " + sufixo, "email": email_conv,
+            "tomador_id": tomador})
+        orgs.registrar("prestador", r.json()["prestador"]["id"])
+        orgs.registrar("contrato", r.json()["contrato"]["id"])
+        corpo = _confere_resposta("POST /terceirizadas", r, gravado[0], TerceirizadaOut, status=201)
+        assert corpo["acesso"] == "convite_criado" and corpo["convite"]["token"]
+        r = client.get("/usuarios", headers=h)
+        _confere_resposta("GET /usuarios", r, usu_actions.listar(auth_actions.UsuarioContexto(
+            id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
+            prestador_id=None)), UsuarioListadoOut)
+        assert "senha_hash" not in r.text and uid in [u["id"] for u in r.json()]
+    finally:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email_conv,))
+            conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
+
+
 def test_openapi_expoe_os_modelos():
     esquemas = client.get("/openapi.json").json()["components"]["schemas"]
     for nome in ("SaudeOut", "TipoOut", "ResultadoBuscaOut", "LoteCriadoOut", "LoteOut", "ConformidadeEmpresaOut",
                  "ConformidadeLoteOut", "EmpresaResumoOut", "DocumentoOut", "DocumentosAgrupadosOut",
-                 "AnalisePontoOut", "ItemFilaRevisaoOut", "RevisaoOut", "EmpresaOut", "TokenOut", "UsuarioOut",
-                 "EventoProgressoOut", "ContagensPontoOut"):
+                 "AnalisePontoOut", "ItemFilaRevisaoOut", "RevisaoOut", "TokenOut", "UsuarioOut",
+                 "EventoProgressoOut", "ContagensPontoOut", "TomadorOut", "PrestadorOut", "ContratoOut", "UsuarioListadoOut", "TerceirizadaOut"):
         assert nome in esquemas, nome
 
 
@@ -425,11 +513,20 @@ COMPARACOES = {
     "GET /empresas": ["test_conformidade"],
     "GET /empresas/{cnpj:path}/conformidade": ["test_conformidade"],
     "GET /lotes/{lote_id}/conformidade": ["test_conformidade"],
-    "POST /cadastro-empresas": ["test_cadastro_empresas"],
-    "GET /cadastro-empresas": ["test_cadastro_empresas"],
-    "GET /cadastro-empresas/{empresa_id}": ["test_cadastro_empresas"],
+    "POST /tomadores": ["test_organizacoes"],
+    "GET /tomadores": ["test_organizacoes"],
+    "POST /prestadores": ["test_organizacoes"],
+    "GET /prestadores": ["test_organizacoes"],
+    "POST /contratos": ["test_organizacoes"],
+    "GET /contratos": ["test_organizacoes"],
+    "GET /usuarios": ["test_terceirizadas_e_usuarios"],
+    "POST /terceirizadas": ["test_terceirizadas_e_usuarios"],
     "POST /auth/login": ["test_auth_login_e_me"],
     "GET /auth/me": ["test_auth_login_e_me"],
+    "POST /convites": ["test_convites"],
+    "GET /convites": ["test_convites"],
+    "GET /convites/{token}": ["test_convites"],
+    "POST /convites/{token}/aceitar": ["test_convites"],
 }
 
 

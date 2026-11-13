@@ -47,7 +47,7 @@ def test_lote_em_erro_volta_a_recebido_e_gera_um_job(enviar, jobs):
     dados, id_ = enviar()
     _estado(id_, "erro")
     resp = lotes_actions.criar_lote(dados, dados, "a.pdf")
-    assert resp == {"lote_id": id_, "estado": "recebido", "existente": True, "empresa_id": None, "reprocessando": True}
+    assert resp == {"lote_id": id_, "estado": "recebido", "existente": True, "contrato_id": None, "reprocessando": True}
     assert _estado(id_) == "recebido"
     assert jobs == [(config.FILA_SEGMENTAR, {"lote_id": id_})]
 
@@ -57,7 +57,7 @@ def test_outros_estados_nao_reprocessam(enviar, jobs, estado):
     dados, id_ = enviar()
     _estado(id_, estado)
     resp = lotes_actions.criar_lote(dados, dados, "a.pdf")
-    assert resp == {"lote_id": id_, "estado": estado, "existente": True, "empresa_id": None}
+    assert resp == {"lote_id": id_, "estado": estado, "existente": True, "contrato_id": None}
     assert _estado(id_) == estado
     assert jobs == []
 
