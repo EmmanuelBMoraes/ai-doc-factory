@@ -88,6 +88,47 @@ export const login = async (usuario: string, senha: string): Promise<LoginRespon
   return data;
 };
 
+/**
+ * Rotas públicas do convite: sem Authorization e sem authFetch (um 404 aqui é convite inválido e
+ * um 401 nunca deve derrubar uma sessão). O token vai no caminho; nunca é logado nem guardado.
+ */
+export const consultarConvite = async (token: string): Promise<ConvitePublico | null> => {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/convites/${encodeURIComponent(token)}`);
+  } catch {
+    throw new Error('Não foi possível conectar ao servidor.');
+  }
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await parseErrorMessage(response, 'Erro ao consultar o convite.'));
+  return response.json();
+};
+
+/** Aceita o convite e já guarda o token de login (mesmo formato do /auth/login). */
+export const aceitarConvite = async (token: string, nome: string, senha: string): Promise<LoginResponse> => {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/convites/${encodeURIComponent(token)}/aceitar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome, senha }),
+    });
+  } catch {
+    throw new Error('Não foi possível conectar ao servidor.');
+  }
+  if (response.status === 404) throw new ConviteInvalidoError();
+  if (!response.ok) throw new Error(await parseErrorMessage(response, 'Erro ao criar o acesso.'));
+  const data: LoginResponse = await response.json();
+  authToken.set(data.access_token);
+  return data;
+};
+
+export class ConviteInvalidoError extends Error {
+  constructor() {
+    super('Este convite não é válido, já foi usado ou expirou. Peça um novo a quem te convidou.');
+  }
+}
+
 export interface TipoDocumentoResponse {
   slug: string;
   nome: string;
@@ -290,12 +331,72 @@ export interface Contrato {
   prestador_razao_social: string;
   prestador_cnpj: string;
   prestador_ativo: boolean;
+  acesso_prestador?: 'ativo' | 'convite_pendente' | 'sem_acesso';
 }
 export interface NovoContrato {
   tomador_id: number;
   prestador_id: number;
   vigencia_inicio?: string | null;
   vigencia_fim?: string | null;
+}
+
+export interface NovoConvite {
+  email: string;
+  nivel: 'plataforma' | 'tomador' | 'prestador';
+  papel: 'admin' | 'membro';
+  tomador_id?: number | null;
+  prestador_id?: number | null;
+}
+/** Resposta de POST /convites: o token só existe aqui. */
+export interface ConviteCriado {
+  id: number;
+  email: string;
+  nivel: string;
+  papel: string;
+  expira_em: string;
+  token: string;
+}
+export interface ConviteListado {
+  id: number;
+  email: string;
+  nivel: string;
+  papel: string;
+  tomador_id: number | null;
+  prestador_id: number | null;
+  organizacao_nome: string | null;
+  estado: 'pendente' | 'usado' | 'expirado';
+  criado_por: number | null;
+  criado_em: string;
+  expira_em: string;
+  usado_em: string | null;
+  usuario_id: number | null;
+}
+export interface ConvitePublico {
+  email: string;
+  nivel: string;
+  organizacao_nome: string | null;
+  expira_em: string;
+}
+export interface NovaTerceirizada {
+  cnpj: string;
+  razao_social: string;
+  email: string;
+  tomador_id?: number | null;
+}
+export interface TerceirizadaCadastrada {
+  contrato: { id: number; ativo: boolean };
+  prestador: { id: number; cnpj: string; razao_social: string };
+  acesso: 'convite_criado' | 'convite_pendente' | 'ja_tem_acesso';
+  convite: { id: number; email: string; expira_em: string; token: string } | null;
+}
+export interface UsuarioListado {
+  id: number;
+  nome: string;
+  email: string;
+  nivel: string;
+  papel: string;
+  ativo: boolean;
+  criado_em: string;
 }
 
 async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -694,6 +795,46 @@ export const apiService = {
     });
     if (!response.ok) {
       throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar contrato'));
+    }
+    return response.json();
+  },
+
+  criarConvite: async (dados: NovoConvite): Promise<ConviteCriado> => {
+    const response = await authFetch(`/convites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao criar convite'));
+    }
+    return response.json();
+  },
+
+  getConvites: async (): Promise<ConviteListado[]> => {
+    const response = await authFetch(`/convites`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar convites'));
+    }
+    return response.json();
+  },
+
+  getUsuarios: async (): Promise<UsuarioListado[]> => {
+    const response = await authFetch(`/usuarios`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar usuários'));
+    }
+    return response.json();
+  },
+
+  cadastrarTerceirizada: async (dados: NovaTerceirizada): Promise<TerceirizadaCadastrada> => {
+    const response = await authFetch(`/terceirizadas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar terceirizada'));
     }
     return response.json();
   },
