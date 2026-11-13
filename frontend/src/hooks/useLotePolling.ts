@@ -149,6 +149,8 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   const uploadingCount = useRef(0)
   // Arquivos só em memória (nunca em storage do navegador): somem ao recarregar a página.
   const filesMap = useRef(new Map<number, File>())
+  /** Contrato escolhido no envio, por lote provisório, para o reenvio manter o mesmo contrato. */
+  const contratoMap = useRef(new Map<number, number | null>())
   const pickerAberto = useRef(false)
   const active = useRef(false)
   const resumedOnMount = useRef(false)
@@ -355,7 +357,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
    * envia os arquivos sem esgotar o pool de 6 conexões do navegador e inicia o monitoramento.
    */
   const uploadFiles = useCallback(
-    (files: File[]) => {
+    (files: File[], contratoId: number | null = null) => {
       const agora = new Date().toLocaleTimeString('pt-BR', {
         hour: '2-digit',
         minute: '2-digit',
@@ -365,6 +367,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         (file, idx) => {
           const tempId = baseTempId - idx
           filesMap.current.set(tempId, file)
+          contratoMap.current.set(tempId, contratoId)
           return {
             tempId,
             file,
@@ -399,10 +402,11 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
           for (const { tempId, file } of placeholders) {
             if (!active.current) return
             try {
-              const response = await apiService.uploadLote(file)
+              const response = await apiService.uploadLote(file, contratoId)
               const realId = response.lote_id
               const estadoInicial = response.estado || 'recebido'
               filesMap.current.delete(tempId)
+              contratoMap.current.delete(tempId)
               setLotes((prev) => {
                 const semDuplicado = prev.filter((l) => l.id !== realId || l.id === tempId)
                 return semDuplicado.map((l) =>
@@ -517,10 +521,11 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
           mensagemAtual: 'Reenviando arquivo para análise...',
         })
         try {
-          const response = await apiService.uploadLote(fileToUpload)
+          const response = await apiService.uploadLote(fileToUpload, contratoMap.current.get(id) ?? null)
           const realId = response.lote_id
           const estadoInicial = response.estado || 'recebido'
           filesMap.current.delete(id)
+          contratoMap.current.delete(id)
           setLotes((prev) => {
             const semDuplicado = prev.filter((l) => l.id !== realId || l.id === id)
             return semDuplicado.map((l) =>
@@ -675,6 +680,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     const handleExpired = () => {
       stopAll()
       filesMap.current.clear()
+      contratoMap.current.clear()
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
       setLotes([])
     }

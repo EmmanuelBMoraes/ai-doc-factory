@@ -98,7 +98,7 @@ export interface LoteResponse {
   lote_id: number;
   estado: string;
   existente: boolean;
-  empresa_id?: number | null;
+  contrato_id?: number | null;
 }
 
 export interface DocumentoResponse {
@@ -113,7 +113,7 @@ export interface DocumentoResponse {
   segmentacao_ambigua?: boolean;
   probabilidades?: Record<string, number> | null;
   tipo_original?: string | null;
-  empresa_id?: number | null;
+  contrato_id?: number | null;
   campos?: Record<string, string>;
   pessoa?: string | null;
   nome_arquivo?: string;
@@ -152,7 +152,7 @@ export interface LoteStatusResponse {
   nome_arquivo: string;
   estado: string;
   docs_pendentes: number;
-  empresa_id?: number | null;
+  contrato_id?: number | null;
   documentos: DocumentoResponse[];
   ultimo_evento?: LoteEventoProgresso | null;
   historico_eventos?: LoteEventoProgresso[];
@@ -243,22 +243,59 @@ export interface RevisaoResultResponse {
   revisado_em: string;
 }
 
-export interface CadastroEmpresaResponse {
+export interface UsuarioAtual {
+  id: number;
+  email: string;
+  nome: string;
+  nivel: string; // 'plataforma' | 'tomador' | 'prestador'
+  papel: string;
+  tomador_id: number | null;
+  prestador_id: number | null;
+}
+
+export interface Tomador {
   id: number;
   nome: string;
+  cnpj: string | null;
+  ativo: boolean;
   criado_em: string;
-  n_lotes: number;
-  n_documentos: number;
-  lotes: { id: number; nome_arquivo: string; estado: string }[];
-  documentos: {
-    id: number;
-    lote_id: number;
-    ordem: number;
-    pagina_ini: number;
-    pagina_fim: number;
-    tipo: string | null;
-    estado: string;
-  }[];
+}
+export interface NovoTomador {
+  nome: string;
+  cnpj?: string | null;
+}
+
+export interface Prestador {
+  id: number;
+  cnpj: string;
+  razao_social: string;
+  ativo: boolean;
+  criado_em: string;
+}
+export interface NovoPrestador {
+  cnpj: string;
+  razao_social: string;
+}
+
+export interface Contrato {
+  id: number;
+  tomador_id: number;
+  prestador_id: number;
+  ativo: boolean;
+  vigencia_inicio: string | null;
+  vigencia_fim: string | null;
+  criado_em: string;
+  tomador_nome: string;
+  tomador_ativo: boolean;
+  prestador_razao_social: string;
+  prestador_cnpj: string;
+  prestador_ativo: boolean;
+}
+export interface NovoContrato {
+  tomador_id: number;
+  prestador_id: number;
+  vigencia_inicio?: string | null;
+  vigencia_fim?: string | null;
 }
 
 async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -298,11 +335,11 @@ export const apiService = {
   /**
    * Faz upload de um arquivo (PDF, JPEG, PNG ou TIFF) para criar um novo lote
    */
-  uploadLote: async (file: File, empresaId?: number): Promise<LoteResponse> => {
+  uploadLote: async (file: File, contratoId?: number | null): Promise<LoteResponse> => {
     const formData = new FormData();
     formData.append('arquivo', file);
-    if (empresaId !== undefined) {
-      formData.append('empresa_id', String(empresaId));
+    if (contratoId !== undefined && contratoId !== null) {
+      formData.append('contrato_id', String(contratoId));
     }
 
     const response = await authFetch(`/lotes`, {
@@ -550,12 +587,12 @@ export const apiService = {
    * Obtém os documentos agrupados por tipo
    */
   getDocumentosAgrupados: async (
-    empresaId?: number,
+    contratoId?: number,
     falhou?: boolean
   ): Promise<DocumentosAgrupadosResponse> => {
     const searchParams = new URLSearchParams();
-    if (empresaId !== undefined) {
-      searchParams.set('empresa_id', String(empresaId));
+    if (contratoId !== undefined) {
+      searchParams.set('contrato_id', String(contratoId));
     }
     if (falhou !== undefined) {
       searchParams.set('falhou', String(falhou));
@@ -601,28 +638,71 @@ export const apiService = {
     return response.json();
   },
 
-  /**
-   * Obtém as empresas cadastradas
-   */
-  getCadastroEmpresas: async (): Promise<CadastroEmpresaResponse[]> => {
-    const response = await authFetch(`/cadastro-empresas`);
+  getTomadores: async (): Promise<Tomador[]> => {
+    const response = await authFetch(`/tomadores`);
     if (!response.ok) {
-      throw new Error(await parseErrorMessage(response, 'Erro ao listar cadastro de empresas'));
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar tomadores'));
     }
     return response.json();
   },
 
-  /**
-   * Cadastra uma nova empresa pelo nome
-   */
-  createCadastroEmpresa: async (nome: string): Promise<CadastroEmpresaResponse> => {
-    const response = await authFetch(`/cadastro-empresas`, {
+  createTomador: async (dados: NovoTomador): Promise<Tomador> => {
+    const response = await authFetch(`/tomadores`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome }),
+      body: JSON.stringify(dados),
     });
     if (!response.ok) {
-      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar empresa'));
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar tomador'));
+    }
+    return response.json();
+  },
+
+  getPrestadores: async (): Promise<Prestador[]> => {
+    const response = await authFetch(`/prestadores`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar prestadores'));
+    }
+    return response.json();
+  },
+
+  createPrestador: async (dados: NovoPrestador): Promise<Prestador> => {
+    const response = await authFetch(`/prestadores`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar prestador'));
+    }
+    return response.json();
+  },
+
+  getContratos: async (): Promise<Contrato[]> => {
+    const response = await authFetch(`/contratos`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar contratos'));
+    }
+    return response.json();
+  },
+
+  createContrato: async (dados: NovoContrato): Promise<Contrato> => {
+    const response = await authFetch(`/contratos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar contrato'));
+    }
+    return response.json();
+  },
+
+  /** Usuário logado (nível plataforma, tomador ou prestador). */
+  getMe: async (): Promise<UsuarioAtual> => {
+    const response = await authFetch(`/auth/me`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao obter o usuário'));
     }
     return response.json();
   },
