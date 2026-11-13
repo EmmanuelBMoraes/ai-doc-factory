@@ -10,6 +10,14 @@ import {
 import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
 import { BTN, BTN_SEC, CARD, ErroBox, INPUT, LABEL, TD, TH } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
+import { CadastroTerceirizadaForm } from '../components/CadastroTerceirizadaForm'
+import {
+  AcessoSelo,
+  ConviteGeradoCard,
+  ReenvioBotao,
+  ReenvioLinha,
+} from '../components/ReenvioConvite'
+import { useReenvioConvite } from '../hooks/useReenvioConvite'
 
 type Aba = 'tomadores' | 'prestadores' | 'contratos'
 
@@ -50,10 +58,6 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
   const [tomCnpj, setTomCnpj] = useState('')
   const [prestCnpj, setPrestCnpj] = useState('')
   const [prestRazao, setPrestRazao] = useState('')
-  const [ctTomador, setCtTomador] = useState('')
-  const [ctPrestador, setCtPrestador] = useState('')
-  const [ctInicio, setCtInicio] = useState('')
-  const [ctFim, setCtFim] = useState('')
 
   // Logo após criar um tomador: convite do primeiro administrador do cliente
   const [tomNovo, setTomNovo] = useState<Tomador | null>(null)
@@ -146,21 +150,7 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
       setPrestRazao('')
     })
 
-  const salvarContrato = (e: React.FormEvent) =>
-    enviar(e, async () => {
-      if (!ctTomador || !ctPrestador) throw new Error('Escolha o tomador e o prestador.')
-      if (ctInicio && ctFim && ctFim < ctInicio) {
-        throw new Error('A vigência final não pode ser anterior à inicial.')
-      }
-      await apiService.createContrato({
-        tomador_id: Number(ctTomador),
-        prestador_id: Number(ctPrestador),
-        vigencia_inicio: ctInicio || null,
-        vigencia_fim: ctFim || null,
-      })
-      setCtInicio('')
-      setCtFim('')
-    })
+  const reenvio = useReenvioConvite(carregar)
 
   const abas: { id: Aba; label: string; n: number }[] = [
     { id: 'contratos', label: 'Contratos', n: contratos.length },
@@ -323,67 +313,42 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
 
           {aba === 'contratos' && (
             <>
-              <form onSubmit={salvarContrato} className={`${CARD} p-5 space-y-4`} aria-label="Novo contrato">
-                <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">Novo contrato</h3>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="ct-tomador" className={LABEL}>Tomador</label>
-                    <select id="ct-tomador" className={INPUT} value={ctTomador} required
-                      onChange={(e) => setCtTomador(e.target.value)}>
-                      <option value="">Selecione</option>
-                      {tomadores.filter((t) => t.ativo).map((t) => (
-                        <option key={t.id} value={t.id}>{t.nome}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="ct-prestador" className={LABEL}>Prestador</label>
-                    <select id="ct-prestador" className={INPUT} value={ctPrestador} required
-                      onChange={(e) => setCtPrestador(e.target.value)}>
-                      <option value="">Selecione</option>
-                      {prestadores.filter((p) => p.ativo).map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.razao_social} ({formatCnpj(p.cnpj)})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="ct-inicio" className={LABEL}>Vigência início (opcional)</label>
-                    <input id="ct-inicio" type="date" className={INPUT} value={ctInicio}
-                      onChange={(e) => setCtInicio(e.target.value)} />
-                  </div>
-                  <div>
-                    <label htmlFor="ct-fim" className={LABEL}>Vigência fim (opcional)</label>
-                    <input id="ct-fim" type="date" className={INPUT} value={ctFim}
-                      onChange={(e) => setCtFim(e.target.value)} />
-                  </div>
-                </div>
-                <ErroBox message={formError} />
-                <button type="submit" disabled={saving || !ctTomador || !ctPrestador} className={BTN}>
-                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}Cadastrar contrato
-                </button>
-              </form>
+              <CadastroTerceirizadaForm
+                titulo="Cadastrar terceirizada para um cliente"
+                tomadores={tomadores}
+                onCadastrada={carregar}
+              />
+              <ConviteGeradoCard reenvio={reenvio} />
               <div className={`${CARD} overflow-hidden`}>
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-[#fbf9fc] dark:bg-[#1f1325] border-b border-[#ebe5ef] dark:border-[#2f1e39]">
                       <th className={TH}>Tomador</th><th className={TH}>Prestador</th>
                       <th className={TH}>CNPJ</th><th className={TH}>Vigência</th><th className={TH}>Situação</th>
+                      <th className={TH}>Acesso</th><th className={TH}></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#ebe5ef] dark:divide-[#2f1e39]">
                     {contratos.map((c) => (
-                      <tr key={c.id}>
-                        <td className={`${TD} font-bold`}>{c.tomador_nome}</td>
-                        <td className={TD}>{c.prestador_razao_social}</td>
-                        <td className={`${TD} font-mono`}>{formatCnpj(c.prestador_cnpj)}</td>
-                        <td className={TD}>{formatData(c.vigencia_inicio)} a {formatData(c.vigencia_fim)}</td>
-                        <td className={TD}><Situacao ativo={c.ativo} /></td>
-                      </tr>
+                      <React.Fragment key={c.id}>
+                        <tr>
+                          <td className={`${TD} font-bold`}>{c.tomador_nome}</td>
+                          <td className={TD}>{c.prestador_razao_social}</td>
+                          <td className={`${TD} font-mono`}>{formatCnpj(c.prestador_cnpj)}</td>
+                          <td className={TD}>
+                            {c.vigencia_inicio || c.vigencia_fim
+                              ? `${formatData(c.vigencia_inicio)} a ${formatData(c.vigencia_fim)}`
+                              : '—'}
+                          </td>
+                          <td className={TD}><Situacao ativo={c.ativo} /></td>
+                          <td className={TD}><AcessoSelo contrato={c} /></td>
+                          <td className={TD}><ReenvioBotao contrato={c} reenvio={reenvio} /></td>
+                        </tr>
+                        <ReenvioLinha contrato={c} reenvio={reenvio} colSpan={7} />
+                      </React.Fragment>
                     ))}
                     {contratos.length === 0 && (
-                      <tr><td className={TD} colSpan={5}>Nenhum contrato cadastrado.</td></tr>
+                      <tr><td className={TD} colSpan={7}>Nenhum contrato cadastrado.</td></tr>
                     )}
                   </tbody>
                 </table>
