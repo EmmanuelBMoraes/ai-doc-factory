@@ -400,6 +400,13 @@ def test_varredura_tomador_e_prestador_recebem_403_em_toda_rota_de_dados(banco, 
     assert not liberadas, f"rotas de dados abertas para {nivel}: {liberadas}"
 
 
+def test_varredura_inclui_rotas_de_organizacoes():
+    """As rotas de tomadores, prestadores e contratos estão entre as varridas (401 sem token)."""
+    varridas = {(m, p) for m, p, _ in _chamadas(_rotas_de_dados())}
+    for caminho in ("/tomadores", "/prestadores", "/contratos"):
+        assert {("GET", caminho), ("POST", caminho)} <= varridas, caminho
+
+
 def test_varredura_inclui_imagem_de_pagina():
     caminhos = {r.path for r in app.routes if isinstance(r, APIRoute)}
     assert "/lotes/{lote_id}/paginas/{numero}/imagem" in caminhos

@@ -10,6 +10,7 @@ from app.routers.cadastro_empresas.routers import router as cadastro_empresas
 from app.routers.documentos.routers import router as documentos
 from app.routers.empresas.routers import router as empresas
 from app.routers.lotes.routers import router as lotes
+from app.routers.organizacoes.routers import router as organizacoes
 from app.routers.revisao.routers import router as revisao
 from app.routers.saude.routers import router as saude
 from app.routers.tipos.routers import router as tipos
@@ -26,5 +27,5 @@ app.add_middleware(
 # existir o filtro por organização (falha fechada). Router novo entra na tupla protegida: a varredura cobra isso.
 app.include_router(saude)
 app.include_router(auth)
-for router in (lotes, busca, documentos, revisao, empresas, cadastro_empresas, tipos):
+for router in (lotes, busca, documentos, revisao, empresas, cadastro_empresas, organizacoes, tipos):
     app.include_router(router, dependencies=[Depends(exigir_plataforma)])

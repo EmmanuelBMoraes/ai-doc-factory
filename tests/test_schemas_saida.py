@@ -33,6 +33,8 @@ from app.routers.empresas import actions as emp_actions
 from app.routers.empresas.schemas import ConformidadeEmpresaOut, ConformidadeLoteOut, EmpresaResumoOut
 from app.routers.lotes import actions as lote_actions
 from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
+from app.routers.organizacoes import actions as org_actions
+from app.routers.organizacoes.schemas import ContratoOut, PrestadorOut, TomadorOut
 from app.routers.revisao import actions as rev_actions
 from app.routers.revisao.schemas import ItemFilaRevisaoOut, Revisao, RevisaoOut
 from app.routers.tipos import actions as tipos_actions
@@ -374,6 +376,34 @@ def test_cadastro_empresas():
             conn.execute("DELETE FROM empresa WHERE id = %s", (empresa_id,))
 
 
+def test_organizacoes(orgs):
+    def achar(itens, id_):
+        return next(i for i in itens if i["id"] == id_)
+    r = client.post("/tomadores", json={"nome": "Schemas " + uuid.uuid4().hex[:8], "cnpj": "11.222.333/0001-81"})
+    tomador = r.json()["id"]
+    orgs.registrar("tomador", tomador)
+    _confere_resposta("POST /tomadores", r, achar(org_actions.listar_tomadores(), tomador), TomadorOut, status=201)
+    lista = _confere("GET /tomadores", "/tomadores", TomadorOut, org_actions.listar_tomadores())
+    assert achar(lista, tomador)["cnpj"] == "11222333000181"
+
+    r = client.post("/prestadores", json={"cnpj": "12345678000195", "razao_social": "Schemas " + uuid.uuid4().hex[:8]})
+    prestador = r.json()["id"]
+    orgs.registrar("prestador", prestador)
+    _confere_resposta("POST /prestadores", r, achar(org_actions.listar_prestadores(), prestador), PrestadorOut,
+                      status=201)
+    _confere("GET /prestadores", "/prestadores", PrestadorOut, org_actions.listar_prestadores())
+
+    r = client.post("/contratos", json={"tomador_id": tomador, "prestador_id": prestador,
+                                        "vigencia_inicio": "2026-01-01"})
+    contrato = r.json()["id"]
+    orgs.registrar("contrato", contrato)
+    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(), contrato), ContratoOut, status=201)
+    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos())
+    filtrados = _confere("GET /contratos", f"/contratos?tomador_id={tomador}&prestador_id={prestador}", ContratoOut,
+                         org_actions.listar_contratos(tomador, prestador))
+    assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
+
+
 def test_auth_login_e_me(auth_real):
     email = f"schemas-{uuid.uuid4().hex[:8]}@exemplo.invalid"
     senha = "senha-de-teste-schemas"
@@ -401,7 +431,7 @@ def test_openapi_expoe_os_modelos():
     for nome in ("SaudeOut", "TipoOut", "ResultadoBuscaOut", "LoteCriadoOut", "LoteOut", "ConformidadeEmpresaOut",
                  "ConformidadeLoteOut", "EmpresaResumoOut", "DocumentoOut", "DocumentosAgrupadosOut",
                  "AnalisePontoOut", "ItemFilaRevisaoOut", "RevisaoOut", "EmpresaOut", "TokenOut", "UsuarioOut",
-                 "EventoProgressoOut", "ContagensPontoOut"):
+                 "EventoProgressoOut", "ContagensPontoOut", "TomadorOut", "PrestadorOut", "ContratoOut"):
         assert nome in esquemas, nome
 
 
@@ -428,6 +458,12 @@ COMPARACOES = {
     "POST /cadastro-empresas": ["test_cadastro_empresas"],
     "GET /cadastro-empresas": ["test_cadastro_empresas"],
     "GET /cadastro-empresas/{empresa_id}": ["test_cadastro_empresas"],
+    "POST /tomadores": ["test_organizacoes"],
+    "GET /tomadores": ["test_organizacoes"],
+    "POST /prestadores": ["test_organizacoes"],
+    "GET /prestadores": ["test_organizacoes"],
+    "POST /contratos": ["test_organizacoes"],
+    "GET /contratos": ["test_organizacoes"],
     "POST /auth/login": ["test_auth_login_e_me"],
     "GET /auth/me": ["test_auth_login_e_me"],
 }
