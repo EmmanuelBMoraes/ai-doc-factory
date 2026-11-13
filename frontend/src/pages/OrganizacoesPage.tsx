@@ -335,7 +335,11 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                           <td className={`${TD} font-bold`}>{c.tomador_nome}</td>
                           <td className={TD}>{c.prestador_razao_social}</td>
                           <td className={`${TD} font-mono`}>{formatCnpj(c.prestador_cnpj)}</td>
-                          <td className={TD}>{formatData(c.vigencia_inicio)} a {formatData(c.vigencia_fim)}</td>
+                          <td className={TD}>
+                            {c.vigencia_inicio || c.vigencia_fim
+                              ? `${formatData(c.vigencia_inicio)} a ${formatData(c.vigencia_fim)}`
+                              : '—'}
+                          </td>
                           <td className={TD}><Situacao ativo={c.ativo} /></td>
                           <td className={TD}><AcessoSelo contrato={c} /></td>
                           <td className={TD}><ReenvioBotao contrato={c} reenvio={reenvio} /></td>
