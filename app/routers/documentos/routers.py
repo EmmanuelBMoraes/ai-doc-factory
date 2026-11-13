@@ -18,7 +18,7 @@ def listar_documentos(contrato_id: Annotated[IdBanco | None, Query()] = None, fa
                       usuario: UsuarioContexto = Depends(exigir_usuario)):
     """Agrupados por tipo. `contrato_id` filtra pelo contrato do lote (404 se não existe). `falhou=true` só estado
     'erro'; `false` exclui; omitido não filtra."""
-    return actions.listar_documentos(contrato_id, falhou, usuario)
+    return actions.listar_documentos(contrato_id, falhou, usuario=usuario)
 
 
 @router.patch("/documentos/{documento_id}/tipo", response_model=DocumentoOut,

@@ -99,16 +99,14 @@ def obter_analise_ponto(documento_id: int) -> dict:
 SEM_TIPO = "sem_tipo"
 
 
-def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None,
-                      usuario: UsuarioContexto | None = None) -> dict:
+def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None, *,
+                      usuario: UsuarioContexto) -> dict:
     """Documentos agrupados pelo campo `tipo` (uma consulta só). Falha = estado 'erro'.
-    `usuario` None = sem filtro (uso interno e testes); a rota sempre passa o usuário. O filtro de escopo vai no
-    SQL; contrato_id fora do escopo é 404, como o inexistente."""
+    `usuario` é obrigatório: o filtro de escopo vai no SQL; contrato_id fora do escopo é 404, como o inexistente."""
     condicoes, args = [], []
-    if usuario is not None:
-        cond, cargs = condicao_lote(usuario)
-        condicoes.append(cond)
-        args.extend(cargs)
+    cond, cargs = condicao_lote(usuario)
+    condicoes.append(cond)
+    args.extend(cargs)
     if contrato_id is not None:
         condicoes.append("l.contrato_id = %s")
         args.append(contrato_id)
@@ -119,7 +117,7 @@ def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None
     where = f"WHERE {' AND '.join(condicoes)}" if condicoes else ""
     with psycopg.connect(config.DATABASE_URL) as conn:
         if contrato_id is not None:
-            ccond, cargs = condicao_contrato(usuario) if usuario is not None else ("TRUE", [])
+            ccond, cargs = condicao_contrato(usuario)
             if conn.execute("SELECT 1 FROM contrato c JOIN tomador t ON t.id = c.tomador_id "
                             f"JOIN prestador p ON p.id = c.prestador_id WHERE c.id = %s AND {ccond}",
                             [contrato_id, *cargs]).fetchone() is None:

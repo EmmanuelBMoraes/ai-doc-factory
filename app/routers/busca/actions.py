@@ -11,9 +11,9 @@ _OPCOES = "StartSel=<b>, StopSel=</b>, MaxFragments=2, MaxWords=25, MinWords=8"
 # A expressão to_tsvector('portuguese', coalesce(texto, '')) precisa ser idêntica à do índice pagina_texto_fts_idx.
 # A busca acontece no texto original (achar por nome ou CPF segue funcionando); o trecho devolvido é montado
 # sobre o texto com CPF, RG e PIS mascarados, para a resposta não revelar o identificador.
-def buscar(q: str, limite: int, usuario: UsuarioContexto | None = None) -> list[dict]:
-    """`usuario` None = sem filtro (uso interno e testes); a rota sempre passa o usuário."""
-    cond, cargs = condicao_lote(usuario) if usuario is not None else ("TRUE", [])
+def buscar(q: str, limite: int, usuario: UsuarioContexto) -> list[dict]:
+    """Resultados só dos lotes no escopo de `usuario` (obrigatório: sem ele não há filtro possível)."""
+    cond, cargs = condicao_lote(usuario)
     with psycopg.connect(config.DATABASE_URL) as conn:
         linhas = conn.execute(
             f"""

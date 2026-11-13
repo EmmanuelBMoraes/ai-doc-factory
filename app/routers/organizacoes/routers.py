@@ -42,4 +42,4 @@ def listar_contratos(tomador_id: Annotated[IdBanco | None, Query()] = None,
                      usuario: UsuarioContexto = Depends(exigir_usuario)):
     """Filtros opcionais por tomador e por prestador. Plataforma vê todos; tomador, os do seu tomador;
     prestador, só os ativos dele."""
-    return actions.listar_contratos(tomador_id, prestador_id, usuario)
+    return actions.listar_contratos(tomador_id, prestador_id, usuario=usuario)

@@ -29,14 +29,13 @@ log = logging.getLogger(__name__)
 STREAM_TETO_SEGUNDOS = 900  # tempo real máximo (time.monotonic) de uma conexão SSE
 
 
-def validar_contrato(contrato_id: int | None, usuario: UsuarioContexto | None = None) -> None:
+def validar_contrato(contrato_id: int | None, usuario: UsuarioContexto) -> None:
     """Prestador: contrato_id obrigatório (422) e contrato dele ativo (senão 404, sem revelar existência).
-    Plataforma (ou `usuario` None, uso interno): sem contrato_id nada é validado e o lote fica sem contrato
+    Plataforma: sem contrato_id nada é validado e o lote fica sem contrato
     (lote sem contrato é só da plataforma); com ele, 404 se não existe e 409 se ele, o tomador ou o prestador
     estão inativos."""
     with psycopg.connect(config.DATABASE_URL) as conn:
-        if usuario is not None:
-            exigir_contrato_de_upload(conn, usuario, contrato_id)
+        exigir_contrato_de_upload(conn, usuario, contrato_id)
         if contrato_id is None:
             return
         linha = conn.execute(

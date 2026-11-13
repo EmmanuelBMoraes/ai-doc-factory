@@ -45,6 +45,10 @@ CNPJ_B, CPF_B = "11222333000181", "11144477735"
 MARCACOES = [{"data": "2025-11-03", "pares": [["08:00", "12:00"], ["12:30", "20:30"]]},
              {"data": "2025-11-04", "pares": [["08:00", "12:00"], ["13:00", "17:00"]]}]
 
+# Chamadas diretas às listagens exigem o usuário (sem ele não há filtro de escopo): a plataforma vê tudo.
+PLATAFORMA = auth_actions.UsuarioContexto(id=0, email="plataforma@teste.local", nome="Plataforma", nivel="plataforma",
+                                         papel="admin", tomador_id=None, prestador_id=None)
+
 
 def _crua(valor):
     """O que o FastAPI devolveria sem response_model."""
@@ -223,11 +227,11 @@ def test_lote_busca_documentos(cenario):
     assert corpo["documentos"][-1]["confianca"] is None  # segmentado: nulos preservados
 
     achados = _confere("GET /busca", "/busca?q=schemasunico&limite=100", ResultadoBuscaOut,
-                       busca_actions.buscar("schemasunico", 100))
+                       busca_actions.buscar("schemasunico", 100, PLATAFORMA))
     assert {a["documento_id"] for a in achados} >= set(ids)
     assert "529.982.247-25" not in json.dumps(achados)  # anonimização preservada
     assert _confere("GET /busca", "/busca?q=palavrainexistentezzz", ResultadoBuscaOut,
-                    busca_actions.buscar("palavrainexistentezzz", 20)) == []
+                    busca_actions.buscar("palavrainexistentezzz", 20, PLATAFORMA)) == []
 
     doc = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[0]}", DocumentoOut,
                    doc_actions.obter_documento(ids[0]))
@@ -238,17 +242,17 @@ def test_lote_busca_documentos(cenario):
                           doc_actions.obter_documento(ids[4]))
     assert sem_campos["campos"] == {} and sem_campos["pessoa"] is None and sem_campos["confianca"] is None
 
-    grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos())
+    grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos(usuario=PLATAFORMA))
     assert grupos["grupos"]
     _confere("GET /documentos", "/documentos?falhou=true", DocumentosAgrupadosOut,
-             doc_actions.listar_documentos(None, True))
+             doc_actions.listar_documentos(None, True, usuario=PLATAFORMA))
     _confere("GET /documentos", "/documentos?falhou=false", DocumentosAgrupadosOut,
-             doc_actions.listar_documentos(None, False))
+             doc_actions.listar_documentos(None, False, usuario=PLATAFORMA))
 
 
 def test_revisao_e_correcoes(cenario, extracoes):
     lote, ids = cenario
-    fila = _confere("GET /revisao", "/revisao", ItemFilaRevisaoOut, rev_actions.fila_revisao())
+    fila = _confere("GET /revisao", "/revisao", ItemFilaRevisaoOut, rev_actions.fila_revisao(PLATAFORMA))
     assert ids[3] in {i["id"] for i in fila}
 
     r = client.post(f"/documentos/{ids[3]}/revisao", json={"tipo": "atestado_medico", "revisor": "ana"})
@@ -380,10 +384,10 @@ def test_organizacoes(orgs):
                                         "vigencia_inicio": "2026-01-01"})
     contrato = r.json()["id"]
     orgs.registrar("contrato", contrato)
-    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(), contrato), ContratoOut, status=201)
-    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos())
+    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(usuario=PLATAFORMA), contrato), ContratoOut, status=201)
+    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos(usuario=PLATAFORMA))
     filtrados = _confere("GET /contratos", f"/contratos?tomador_id={tomador}&prestador_id={prestador}", ContratoOut,
-                         org_actions.listar_contratos(tomador, prestador))
+                         org_actions.listar_contratos(tomador, prestador, usuario=PLATAFORMA))
     assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
 

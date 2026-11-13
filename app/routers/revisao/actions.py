@@ -13,9 +13,9 @@ from app.routers.documentos.actions import campos_por_documento, extras_document
 from app.routers.revisao.schemas import Revisao
 
 
-def fila_revisao(usuario: UsuarioContexto | None = None) -> list[dict]:
-    """`usuario` None = sem filtro (uso interno e testes); a rota sempre passa o usuário."""
-    cond, cargs = condicao_lote(usuario) if usuario is not None else ("TRUE", [])
+def fila_revisao(usuario: UsuarioContexto) -> list[dict]:
+    """Fila só dos lotes no escopo de `usuario` (obrigatório)."""
+    cond, cargs = condicao_lote(usuario)
     with psycopg.connect(config.DATABASE_URL) as conn:
         docs = conn.execute(
             "SELECT d.id, d.lote_id, d.tipo, d.confianca, d.motivo_revisao, d.pagina_ini, d.pagina_fim, "

@@ -98,14 +98,13 @@ def criar_contrato(corpo: NovoContrato) -> dict:
         raise HTTPException(422, "vigencia_fim não pode ser anterior a vigencia_inicio")
 
 
-def listar_contratos(tomador_id: int | None = None, prestador_id: int | None = None,
-                     usuario: UsuarioContexto | None = None) -> list[dict]:
-    """`usuario` None = sem filtro (uso interno e testes); as rotas sempre passam o usuário."""
+def listar_contratos(tomador_id: int | None = None, prestador_id: int | None = None, *,
+                     usuario: UsuarioContexto) -> list[dict]:
+    """Contratos no escopo de `usuario` (obrigatório), com filtros opcionais por tomador e prestador."""
     condicoes, args = [], []
-    if usuario is not None:
-        cond, cargs = condicao_contrato(usuario)
-        condicoes.append(cond)
-        args.extend(cargs)
+    cond, cargs = condicao_contrato(usuario)
+    condicoes.append(cond)
+    args.extend(cargs)
     if tomador_id is not None:
         condicoes.append("c.tomador_id = %s")
         args.append(tomador_id)
