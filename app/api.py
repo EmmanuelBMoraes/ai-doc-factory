@@ -6,7 +6,6 @@ from app.routers import r  # noqa: F401  (reexportado: conexão Redis compartilh
 from app.routers.auth.actions import exigir_plataforma
 from app.routers.auth.routers import router as auth
 from app.routers.busca.routers import router as busca
-from app.routers.cadastro_empresas.routers import router as cadastro_empresas
 from app.routers.documentos.routers import router as documentos
 from app.routers.empresas.routers import router as empresas
 from app.routers.lotes.routers import router as lotes
@@ -27,5 +26,5 @@ app.add_middleware(
 # existir o filtro por organização (falha fechada). Router novo entra na tupla protegida: a varredura cobra isso.
 app.include_router(saude)
 app.include_router(auth)
-for router in (lotes, busca, documentos, revisao, empresas, cadastro_empresas, organizacoes, tipos):
+for router in (lotes, busca, documentos, revisao, empresas, organizacoes, tipos):
     app.include_router(router, dependencies=[Depends(exigir_plataforma)])

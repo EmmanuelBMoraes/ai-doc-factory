@@ -114,6 +114,7 @@ def orgs():
             criados[tipo].append(id_)
 
     yield Ajuda
+    conn.execute("DELETE FROM lote WHERE contrato_id = ANY(%s)", (criados["contrato"],))
     conn.execute("DELETE FROM contrato WHERE id = ANY(%s)", (criados["contrato"],))
     conn.execute("DELETE FROM prestador WHERE id = ANY(%s)", (criados["prestador"],))
     conn.execute("DELETE FROM tomador WHERE id = ANY(%s)", (criados["tomador"],))

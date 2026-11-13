@@ -27,24 +27,31 @@ log = logging.getLogger(__name__)
 STREAM_TETO_SEGUNDOS = 900  # tempo real máximo (time.monotonic) de uma conexão SSE
 
 
-def validar_empresa(empresa_id: int | None) -> None:
-    if empresa_id is None:
+def validar_contrato(contrato_id: int | None) -> None:
+    """404 se o contrato não existe; 409 se ele, o tomador ou o prestador estão inativos.
+    Sem contrato_id nada é validado: o lote fica sem contrato.
+    Por enquanto só a plataforma envia lotes, então o contrato é opcional. Quando o prestador ganhar acesso ao
+    upload, o contrato passará a ser obrigatório para ele (e o lote sem contrato continuará só da plataforma)."""
+    if contrato_id is None:
         return
     with psycopg.connect(config.DATABASE_URL) as conn:
-        if conn.execute("SELECT 1 FROM empresa WHERE id = %s", (empresa_id,)).fetchone() is None:
-            raise HTTPException(404, f"empresa {empresa_id} não encontrada")
+        linha = conn.execute(
+            "SELECT c.ativo, t.ativo, p.ativo FROM contrato c "
+            "JOIN tomador t ON t.id = c.tomador_id JOIN prestador p ON p.id = c.prestador_id WHERE c.id = %s",
+            (contrato_id,)).fetchone()
+    if linha is None:
+        raise HTTPException(404, f"contrato {contrato_id} não encontrado")
+    if not all(linha):
+        raise HTTPException(409, f"contrato {contrato_id} inativo (ou de tomador/prestador inativo)")
 
 
-def _reenvio(conn, sha: str, pdf: bytes, empresa_id: int | None) -> tuple[dict, bool]:
-    """Mesmo arquivo já enviado: devolve o lote existente e diz se precisa enfileirar a segmentação.
-    Lote em 'erro' volta para 'recebido' (reprocessa); 'ocr', 'classificando' e 'concluido' ficam como estão."""
-    id_, estado, atual = conn.execute(
-        "SELECT id, estado, empresa_id FROM lote WHERE sha256 = %s", (sha,)).fetchone()
-    if empresa_id is not None and atual is not None and atual != empresa_id:
-        raise HTTPException(409, f"lote {id_} já pertence à empresa {atual}")
-    if empresa_id is not None and atual is None:
-        conn.execute("UPDATE lote SET empresa_id = %s WHERE id = %s", (empresa_id, id_))
-        atual = empresa_id
+def _reenvio(conn, sha: str, pdf: bytes, contrato_id: int | None) -> tuple[dict, bool]:
+    """Mesmo arquivo já enviado NESTE contrato (ou, sem contrato, já enviado sem contrato): devolve o lote existente
+    e diz se precisa enfileirar a segmentação. Lote em 'erro' volta para 'recebido' (reprocessa); 'ocr',
+    'classificando' e 'concluido' ficam como estão. O lote nunca troca de contrato."""
+    id_, estado = conn.execute(
+        "SELECT id, estado FROM lote WHERE sha256 = %s AND contrato_id IS NOT DISTINCT FROM %s",
+        (sha, contrato_id)).fetchone()
     reprocessando = False
     if estado == "erro":
         # atômico: de dois reenvios simultâneos, só um enxerga 'erro' e enfileira
@@ -60,28 +67,34 @@ def _reenvio(conn, sha: str, pdf: bytes, empresa_id: int | None) -> tuple[dict, 
         if not original.is_file():  # a gravação pode ter falhado antes
             original.parent.mkdir(parents=True, exist_ok=True)
             original.write_bytes(pdf)
-    resposta = {"lote_id": id_, "estado": estado, "existente": True, "empresa_id": atual}
+    resposta = {"lote_id": id_, "estado": estado, "existente": True, "contrato_id": contrato_id}
     if reprocessando:
         resposta["reprocessando"] = True
     return resposta, reenfileirar
 
 
-def criar_lote(dados: bytes, pdf: bytes, nome_arquivo: str | None, empresa_id: int | None = None) -> dict:
+def criar_lote(dados: bytes, pdf: bytes, nome_arquivo: str | None, contrato_id: int | None = None) -> dict:
     sha = hashlib.sha256(dados).hexdigest()  # dos bytes originais enviados, PDF ou imagem
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        row = conn.execute(
-            "INSERT INTO lote (sha256, nome_arquivo, empresa_id) VALUES (%s, %s, %s) "
-            "ON CONFLICT (sha256) DO NOTHING RETURNING id, estado",
-            (sha, nome_arquivo or "lote.pdf", empresa_id),
-        ).fetchone()
-        if row is None:  # mesmo arquivo já enviado
-            resposta, reenfileirar = _reenvio(conn, sha, pdf, empresa_id)
-        else:
-            pasta = Path(config.DATA_DIR) / f"lote_{row[0]}"
-            pasta.mkdir(parents=True, exist_ok=True)
-            (pasta / "original.pdf").write_bytes(pdf)
-            resposta = {"lote_id": row[0], "estado": row[1], "existente": False, "empresa_id": empresa_id}
-            reenfileirar = True
+    # A unicidade do arquivo é por contrato (dois índices únicos parciais): o ON CONFLICT mira o índice do caso.
+    alvo = "(contrato_id, sha256) WHERE contrato_id IS NOT NULL" if contrato_id is not None \
+        else "(sha256) WHERE contrato_id IS NULL"
+    try:
+        with psycopg.connect(config.DATABASE_URL) as conn:
+            row = conn.execute(
+                "INSERT INTO lote (sha256, nome_arquivo, contrato_id) VALUES (%s, %s, %s) "
+                f"ON CONFLICT {alvo} DO NOTHING RETURNING id, estado",
+                (sha, nome_arquivo or "lote.pdf", contrato_id),
+            ).fetchone()
+            if row is None:  # mesmo arquivo já enviado neste contrato
+                resposta, reenfileirar = _reenvio(conn, sha, pdf, contrato_id)
+            else:
+                pasta = Path(config.DATA_DIR) / f"lote_{row[0]}"
+                pasta.mkdir(parents=True, exist_ok=True)
+                (pasta / "original.pdf").write_bytes(pdf)
+                resposta = {"lote_id": row[0], "estado": row[1], "existente": False, "contrato_id": contrato_id}
+                reenfileirar = True
+    except psycopg.errors.ForeignKeyViolation:  # contrato apagado entre a validação e o INSERT
+        raise HTTPException(404, f"contrato {contrato_id} não encontrado")
     if reenfileirar:  # só depois do commit, para o worker enxergar o estado novo
         limpar_cancelado(resposta["lote_id"], r)
         limpar_tarefas_pos(resposta["lote_id"], r)
@@ -119,7 +132,7 @@ def _serializar_pacote(pacote: dict, sort_keys: bool = False) -> str:
 def obter_lote(lote_id: int) -> dict:
     with psycopg.connect(config.DATABASE_URL) as conn:
         lote = conn.execute(
-            "SELECT id, nome_arquivo, estado, docs_pendentes, empresa_id FROM lote WHERE id = %s", (lote_id,)
+            "SELECT id, nome_arquivo, estado, docs_pendentes, contrato_id FROM lote WHERE id = %s", (lote_id,)
         ).fetchone()
         if lote is None:
             raise HTTPException(404, "lote não encontrado")
@@ -129,7 +142,7 @@ def obter_lote(lote_id: int) -> dict:
         ).fetchall()
     ultimo, historico = obter_progresso_lote(lote_id, r)
     return {
-        "id": lote[0], "nome_arquivo": lote[1], "estado": lote[2], "docs_pendentes": lote[3], "empresa_id": lote[4],
+        "id": lote[0], "nome_arquivo": lote[1], "estado": lote[2], "docs_pendentes": lote[3], "contrato_id": lote[4],
         "ultimo_evento": ultimo,
         "historico_eventos": historico,
         "documentos": [
