@@ -1,36 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import {
   apiService,
+  type ConviteCriado,
   type Contrato,
   type Prestador,
   type Tomador,
 } from '../services/api'
 import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
+import { BTN, BTN_SEC, CARD, ErroBox, INPUT, LABEL, TD, TH } from '../components/formUi'
+import { ConviteLink } from '../components/ConviteLink'
 
 type Aba = 'tomadores' | 'prestadores' | 'contratos'
-
-const CARD =
-  'rounded-2xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] shadow-sm'
-const INPUT =
-  'w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#150c18] border border-[#dcd4e2] dark:border-[#3d2948] text-[#2d0a33] dark:text-white placeholder-[#8f8298] focus:outline-none focus:ring-1 focus:ring-[#9333ea]'
-const LABEL = 'block text-xs font-semibold text-[#2d0a33] dark:text-white mb-1'
-const BTN =
-  'px-5 py-2 rounded-xl text-sm font-bold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer'
-const TH =
-  'px-5 py-3 text-xs font-bold text-[#6e6378] dark:text-[#a093a8] uppercase tracking-wider'
-const TD = 'px-5 py-3 text-sm text-[#2d0a33] dark:text-[#f8f5fc]'
-
-const ErroBox: React.FC<{ message: string | null }> = ({ message }) =>
-  message ? (
-    <div
-      role="alert"
-      className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 flex items-center gap-2 text-red-600 dark:text-red-400"
-    >
-      <AlertCircle className="w-4 h-4 shrink-0" />
-      <span className="text-xs font-medium">{message}</span>
-    </div>
-  ) : null
 
 const Situacao: React.FC<{ ativo: boolean }> = ({ ativo }) => (
   <span
@@ -73,6 +54,13 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
   const [ctPrestador, setCtPrestador] = useState('')
   const [ctInicio, setCtInicio] = useState('')
   const [ctFim, setCtFim] = useState('')
+
+  // Logo após criar um tomador: convite do primeiro administrador do cliente
+  const [tomNovo, setTomNovo] = useState<Tomador | null>(null)
+  const [convEmail, setConvEmail] = useState('')
+  const [convSaving, setConvSaving] = useState(false)
+  const [convError, setConvError] = useState<string | null>(null)
+  const [convCriado, setConvCriado] = useState<ConviteCriado | null>(null)
 
   const carregar = useCallback(async () => {
     try {
@@ -119,10 +107,36 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
   const salvarTomador = (e: React.FormEvent) =>
     enviar(e, async () => {
       if (tomCnpj && !isCnpjValido(tomCnpj)) throw new Error('CNPJ inválido: confira os dígitos.')
-      await apiService.createTomador({ nome: tomNome, cnpj: tomCnpj || null })
+      const novo = await apiService.createTomador({ nome: tomNome, cnpj: tomCnpj || null })
       setTomNome('')
       setTomCnpj('')
+      setTomNovo(novo)
+      setConvEmail('')
+      setConvError(null)
+      setConvCriado(null)
     })
+
+  const convidarAdminCliente = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!tomNovo) return
+    setConvError(null)
+    setConvSaving(true)
+    try {
+      setConvCriado(
+        await apiService.criarConvite({
+          email: convEmail.trim(),
+          nivel: 'tomador',
+          papel: 'admin',
+          tomador_id: tomNovo.id,
+        })
+      )
+      setConvEmail('')
+    } catch (err) {
+      setConvError(err instanceof Error ? err.message : 'Erro ao criar convite')
+    } finally {
+      setConvSaving(false)
+    }
+  }
 
   const salvarPrestador = (e: React.FormEvent) =>
     enviar(e, async () => {
@@ -213,6 +227,30 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                   {saving && <Loader2 className="w-4 h-4 animate-spin" />}Cadastrar tomador
                 </button>
               </form>
+              {tomNovo && (
+                <form onSubmit={convidarAdminCliente} className={`${CARD} p-5 space-y-4`}
+                  aria-label="Convidar administrador do cliente">
+                  <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">
+                    Convidar administrador do cliente: {tomNovo.nome}
+                  </h3>
+                  {!convCriado && (
+                    <div>
+                      <label htmlFor="conv-adm-email" className={LABEL}>E-mail do administrador</label>
+                      <input id="conv-adm-email" type="email" className={INPUT} value={convEmail} required
+                        onChange={(e) => setConvEmail(e.target.value)} />
+                    </div>
+                  )}
+                  <ErroBox message={convError} />
+                  {convCriado ? (
+                    <ConviteLink token={convCriado.token} expiraEm={convCriado.expira_em} />
+                  ) : (
+                    <button type="submit" disabled={convSaving || !convEmail.trim()} className={BTN}>
+                      {convSaving && <Loader2 className="w-4 h-4 animate-spin" />}Convidar administrador do cliente
+                    </button>
+                  )}
+                  <button type="button" className={BTN_SEC} onClick={() => setTomNovo(null)}>Fechar</button>
+                </form>
+              )}
               <div className={`${CARD} overflow-hidden`}>
                 <table className="w-full text-left border-collapse">
                   <thead>

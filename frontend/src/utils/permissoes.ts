@@ -14,3 +14,11 @@ export const veConformidade = (usuario: Usuario): boolean => usuario?.nivel === 
 
 /** Organizações (tomador, prestador, contrato) também é exclusivo da plataforma. */
 export const veOrganizacoes = (usuario: Usuario): boolean => usuario?.nivel === 'plataforma'
+
+/** Administradores de qualquer nível convidam colegas e veem a equipe. */
+export const podeConvidar = (usuario: Pick<UsuarioAtual, 'papel'> | null | undefined): boolean =>
+  usuario?.papel === 'admin'
+
+/** Terceirizadas (cadastro e convite) é a tela do administrador do cliente (tomador). */
+export const veTerceirizadas = (usuario: Pick<UsuarioAtual, 'nivel' | 'papel'> | null | undefined): boolean =>
+  usuario?.nivel === 'tomador' && usuario?.papel === 'admin'

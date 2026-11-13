@@ -7,6 +7,10 @@ import CategoryPage from './pages/CategoryPage'
 import ManualReviewPage, { OFFICIAL_CATEGORY_OPTIONS } from './pages/ManualReviewPage'
 import LoginPage from './pages/LoginPage'
 import OrganizacoesPage from './pages/OrganizacoesPage'
+import TerceirizadasPage from './pages/TerceirizadasPage'
+import EquipePage from './pages/EquipePage'
+import AceitarConvitePage from './pages/AceitarConvitePage'
+import { estaNaTelaDeConvite } from './utils/convites'
 import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
 import { LotesStatusPanel } from './components/LotesStatusPanel'
 import { trackedStatus } from './hooks/lotePollingLogic'
@@ -14,7 +18,7 @@ import { useLotePolling } from './hooks/useLotePolling'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse, type UsuarioAtual } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
-import { podeEditar, podeEnviar, veConformidade, veOrganizacoes } from './utils/permissoes'
+import { podeConvidar, podeEditar, podeEnviar, veConformidade, veOrganizacoes, veTerceirizadas } from './utils/permissoes'
 
 function formatDatePtBr(isoString?: string | null): string {
   if (!isoString) return new Date().toLocaleDateString('pt-BR')
@@ -62,7 +66,12 @@ export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => authToken.get() !== null)
 
   // Navigation view state: 'home' | 'categoria' | 'revisao'
-  const [currentView, setCurrentView] = useState<'home' | 'categoria' | 'revisao' | 'organizacoes'>('home')
+  const [currentView, setCurrentView] = useState<
+    'home' | 'categoria' | 'revisao' | 'organizacoes' | 'terceirizadas' | 'equipe'
+  >('home')
+
+  // Tela pública de aceite de convite: tem prioridade sobre o login (o token vem no fragmento da URL)
+  const [emConvite, setEmConvite] = useState<boolean>(estaNaTelaDeConvite)
 
   // Usuário logado: o nível decide o que aparece (Organizações e contrato obrigatório no upload)
   const [usuario, setUsuario] = useState<UsuarioAtual | null>(null)
@@ -522,6 +531,28 @@ export function App() {
     return categories.map((c) => ({ slug: c.slug, name: c.name }))
   }, [categories])
 
+  if (emConvite) {
+    return (
+      <div className="min-h-screen bg-[#fbf9fc] dark:bg-[#140c17] text-[#2d0a33] dark:text-[#f7f3f9] relative font-sans antialiased transition-colors">
+        <BackgroundWave />
+        <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+          <AceitarConvitePage
+            onSuccess={() => {
+              // Já havia sessão de outra conta nesta aba: recarrega para não misturar com o usuário antigo
+              if (isAuthenticated) {
+                window.location.replace('/')
+                return
+              }
+              setCurrentView('home')
+              setIsAuthenticated(true)
+              setEmConvite(false)
+            }}
+          />
+        </main>
+      </div>
+    )
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-[#fbf9fc] dark:bg-[#140c17] text-[#2d0a33] dark:text-[#f7f3f9] relative font-sans antialiased transition-colors">
@@ -547,17 +578,21 @@ export function App() {
         onOpenReview={handleOpenReview}
         reviewCount={reviewCount}
         activeTab={
-          currentView === 'revisao' ? 'revisao' : currentView === 'organizacoes' ? 'organizacoes' : 'documentos'
+          currentView === 'revisao' || currentView === 'organizacoes' || currentView === 'terceirizadas' || currentView === 'equipe'
+            ? currentView
+            : 'documentos'
         }
         showOrganizacoes={veOrganizacoes(usuario)}
+        showTerceirizadas={veTerceirizadas(usuario)}
+        showEquipe={podeConvidar(usuario)}
         mostrarEnvio={podeEnviar(usuario)}
         onSelectTab={(tab) => {
           if (tab === 'documentos') {
             handleBackToHome()
           } else if (tab === 'revisao') {
             handleOpenReview()
-          } else if (tab === 'organizacoes') {
-            setCurrentView('organizacoes')
+          } else {
+            setCurrentView(tab)
             window.scrollTo({ top: 0, behavior: 'smooth' })
           }
         }}
@@ -641,6 +676,14 @@ export function App() {
 
             {currentView === 'organizacoes' && veOrganizacoes(usuario) && (
               <OrganizacoesPage onBack={handleBackToHome} />
+            )}
+
+            {currentView === 'terceirizadas' && veTerceirizadas(usuario) && (
+              <TerceirizadasPage onBack={handleBackToHome} />
+            )}
+
+            {currentView === 'equipe' && usuario && podeConvidar(usuario) && (
+              <EquipePage usuario={usuario} onBack={handleBackToHome} />
             )}
 
             {/* VIEW 3: HOME PRINCIPAL (Pastas) */}
