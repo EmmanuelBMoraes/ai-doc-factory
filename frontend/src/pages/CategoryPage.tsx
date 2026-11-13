@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react'
-import { Search, ChevronLeft, ChevronDown, FileText } from 'lucide-react'
+import { Search, ChevronLeft, ChevronDown, FileText, Download, ClipboardCheck, ChevronRight, Eye } from 'lucide-react'
 import type { DocumentCategory, DetailedDocument } from '../types'
+import { downloadDocumento } from '../services/api'
 import AuditoriaPontoModal from '../components/AuditoriaPontoModal'
+import { DocumentPreviewModal, DocumentThumbnail } from '../components/DocumentPreviewModal'
 
 interface CategoryPageProps {
   category: DocumentCategory
@@ -19,6 +21,20 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
   const [selectedConfidence, setSelectedConfidence] = useState('todas')
   const [sortBy, setSortBy] = useState<'recentes' | 'antigos' | 'confianca'>('recentes')
   const [auditDoc, setAuditDoc] = useState<{ id: number; filename: string } | null>(null)
+  const [previewDoc, setPreviewDoc] = useState<DetailedDocument | null>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
+  const handleDownload = async (e: React.MouseEvent, doc: DetailedDocument) => {
+    e.stopPropagation()
+    setDownloadingId(doc.id)
+    try {
+      await downloadDocumento(Number(doc.id), doc.filename)
+    } catch {
+      // erro silencioso ou feedback mínimo sem quebrar a listagem
+    } finally {
+      setDownloadingId(null)
+    }
+  }
 
   // Get unique person names for the dropdown
   const peopleList = useMemo(() => {
@@ -74,8 +90,16 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
     matricula: 'Matrícula',
     data_admissao: 'Admissão',
     data_exame: 'Data do exame',
+    tipo_exame: 'Tipo de exame',
     data_termino: 'Término',
+    data_emissao: 'Emissão',
+    competencia: 'Competência',
+    inicio_ferias: 'Início das férias',
+    fim_ferias: 'Fim das férias',
+    inicio_periodo: 'Início do período',
+    fim_periodo: 'Fim do período',
     tipo_prazo: 'Prazo',
+    nome_empresa: 'Empresa',
     razao_social_prestadora: 'Empresa',
     cnpj_prestadora: 'CNPJ',
   }
@@ -195,34 +219,100 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
             </p>
           </div>
         ) : (
-          filteredDocuments.map((doc) => (
-            <div
-              key={doc.id}
-              className="w-full rounded-2xl p-4 sm:p-5 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] hover:border-[#c026d3]/40 dark:hover:border-[#c026d3]/50 transition-all flex items-start gap-4 shadow-2xs"
-            >
-              {/* Document Icon Box */}
-              <div className="w-10 h-10 rounded-xl bg-[#f5eff7] dark:bg-[#25152b] text-[#9333ea] dark:text-[#d67bf3] flex items-center justify-center shrink-0 mt-0.5">
-                <FileText className="w-5 h-5 stroke-[1.8]" />
-              </div>
+          filteredDocuments.map((doc) => {
+            const isFolhaPonto = category.id === 'folha_ponto'
+            const openAudit = () =>
+              setAuditDoc({ id: Number(doc.id), filename: doc.filename })
 
-              {/* Document Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
-                    {doc.filename}
-                  </h3>
-                  
-                  {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
-                  {category.id === 'folha_ponto' && (
-                    <button
-                      onClick={() => setAuditDoc({ id: Number(doc.id), filename: doc.filename })}
-                      className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold bg-[#f3e8ff] dark:bg-[#2e1065] text-[#7e22ce] dark:text-[#d8b4fe] border border-[#e9d5ff] dark:border-[#4c1d95] hover:bg-[#e9d5ff] transition-colors"
-                    >
-                      <Search className="w-3 h-3" />
-                      Auditoria
-                    </button>
-                  )}
-                </div>
+            return (
+              <div
+                key={doc.id}
+                onClick={isFolhaPonto ? openAudit : undefined}
+                onKeyDown={
+                  isFolhaPonto
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          openAudit()
+                        }
+                      }
+                    : undefined
+                }
+                role={isFolhaPonto ? 'button' : undefined}
+                tabIndex={isFolhaPonto ? 0 : undefined}
+                className={`group w-full rounded-2xl p-4 sm:p-5 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] hover:border-[#c026d3]/40 dark:hover:border-[#c026d3]/50 transition-all flex items-start gap-4 shadow-2xs ${
+                  isFolhaPonto
+                    ? 'cursor-pointer hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40'
+                    : ''
+                }`}
+              >
+                {/* Document Thumbnail Preview */}
+                <DocumentThumbnail
+                  loteId={doc.loteId}
+                  page={doc.startPage ?? 1}
+                  alt={`Preview de ${doc.filename}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPreviewDoc(doc)
+                  }}
+                />
+
+                {/* Document Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
+                        {doc.filename}
+                      </h3>
+                      {doc.originalFilename && doc.originalFilename !== doc.filename && (
+                        <p className="text-[11px] text-[#8f8298] dark:text-[#7f7188] truncate">
+                          Original: {doc.originalFilename}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="shrink-0 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setPreviewDoc(doc)
+                        }}
+                        title="Visualizar documento"
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#4b3e56] dark:text-[#d5c7df] border border-[#e6dce9] dark:border-[#382343] hover:bg-[#ebe2f0] dark:hover:bg-[#32203d] transition-colors cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Visualizar</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDownload(e, doc)}
+                        disabled={downloadingId === doc.id}
+                        title="Baixar PDF com nome padronizado"
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#4b3e56] dark:text-[#d5c7df] border border-[#e6dce9] dark:border-[#382343] hover:bg-[#ebe2f0] dark:hover:bg-[#32203d] transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>{downloadingId === doc.id ? 'Baixando...' : 'Baixar PDF'}</span>
+                      </button>
+
+                      {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
+                      {isFolhaPonto && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openAudit()
+                          }}
+                          title="Abrir auditoria da folha de ponto"
+                          className="shrink-0 inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-semibold bg-[#f6effb] dark:bg-[#2b1738] text-[#6c2c91] dark:text-[#d8b4fe] border border-[#e3d2f0] dark:border-[#4c1d95] group-hover:bg-[#6c2c91] group-hover:text-white group-hover:border-[#6c2c91] hover:bg-[#6c2c91] hover:text-white hover:border-[#6c2c91] dark:group-hover:bg-[#7e22ce] dark:group-hover:text-white dark:group-hover:border-[#7e22ce] shadow-2xs transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40"
+                        >
+                          <ClipboardCheck className="w-4 h-4 shrink-0" />
+                          <span>Ver auditoria</span>
+                          <ChevronRight className="w-3.5 h-3.5 opacity-70" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#a093a8] mt-0.5">
                   {doc.personName} · {doc.pages} página{doc.pages > 1 ? 's' : ''} · Processado em {doc.processedDate} · Confiança {Math.round(doc.confidence * 100)}%
                 </p>
@@ -272,7 +362,8 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
                 </div>
               </div>
             </div>
-          ))
+            )
+          })
         )}
       </div>
 
@@ -281,6 +372,13 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
           documentoId={auditDoc.id}
           filename={auditDoc.filename}
           onClose={() => setAuditDoc(null)}
+        />
+      )}
+
+      {previewDoc && (
+        <DocumentPreviewModal
+          doc={previewDoc}
+          onClose={() => setPreviewDoc(null)}
         />
       )}
     </div>

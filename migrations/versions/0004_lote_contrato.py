@@ -1,7 +1,7 @@
 """lote pertence a um contrato (opcional); a tabela antiga `empresa` e `lote.empresa_id` são removidas
 
-Revision ID: 0003_lote_contrato
-Revises: 0002_modelo_acesso
+Revision ID: 0004_lote_contrato
+Revises: 0003_nome_padronizado_documento
 
 Upgrade:
 - `lote.contrato_id` (NULL = lote sem contrato: os que já existiam e os que a plataforma enviar sem contrato;
@@ -18,8 +18,8 @@ Downgrade:
 """
 from alembic import op
 
-revision = "0003_lote_contrato"
-down_revision = "0002_modelo_acesso"
+revision = "0004_lote_contrato"
+down_revision = "0003_nome_padronizado_documento"
 branch_labels = None
 depends_on = None
 

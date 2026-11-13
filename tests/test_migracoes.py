@@ -17,7 +17,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 TABELAS_SEM_EMPRESA = {"lote", "documento", "pagina", "perfil_jornada", "analise_ponto", "documento_campos"}
 TABELAS = TABELAS_SEM_EMPRESA | {"empresa"}  # 0001_baseline
 TABELAS_ACESSO = {"tomador", "prestador", "contrato", "usuario"}  # migração 0002
-# migração 0003: `empresa` sai, `lote` ganha `contrato_id`
+# migração 0004: `empresa` sai, `lote` ganha `contrato_id`
 TABELAS_HEAD = TABELAS_SEM_EMPRESA | TABELAS_ACESSO
 
 
