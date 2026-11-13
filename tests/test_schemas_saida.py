@@ -25,6 +25,8 @@ from app.routers.auth import actions as auth_actions
 from app.routers.auth.schemas import TokenOut, UsuarioOut
 from app.routers.busca import actions as busca_actions
 from app.routers.busca.schemas import ResultadoBuscaOut
+from app.routers.convites import actions as conv_actions
+from app.routers.convites.schemas import ConviteCriadoOut, ConviteOut, ConvitePublicoOut
 from app.routers.documentos import actions as doc_actions
 from app.routers.documentos.schemas import AnalisePontoOut, DocumentoOut, DocumentosAgrupadosOut
 from app.routers.empresas import actions as emp_actions
@@ -413,6 +415,39 @@ def test_auth_login_e_me(auth_real):
             conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
 
 
+def test_convites(auth_real):
+    import time
+
+    import jwt
+    email = f"schemas-convite-{uuid.uuid4().hex[:8]}@exemplo.invalid"
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        uid = conn.execute("INSERT INTO usuario (email, nome, nivel, papel) VALUES (%s, 'Plat Schemas', 'plataforma', "
+                           "'admin') RETURNING id", (f"plat-{email}",)).fetchone()[0]
+    agora = int(time.time())
+    h = {"Authorization": "Bearer " + jwt.encode({"sub": str(uid), "iat": agora - 5, "exp": agora + 600},
+                                                  config.AUTH_SEGREDO, algorithm="HS256")}
+    try:
+        r = client.post("/convites", headers=h, json={"email": email, "nivel": "plataforma", "papel": "membro"})
+        assert r.status_code == 201
+        token = r.json()["token"]
+        listado = next(c for c in conv_actions.listar() if c["id"] == r.json()["id"])
+        crua = {k: listado[k] for k in ("id", "email", "nivel", "papel", "expira_em")} | {"token": token}
+        _confere_resposta("POST /convites", r, crua, ConviteCriadoOut, status=201)
+        _confere_resposta("GET /convites", client.get("/convites", headers=h), conv_actions.listar(), ConviteOut)
+        r = client.get(f"/convites/{token}")
+        _confere_resposta("GET /convites/{token}", r, conv_actions.consultar(token), ConvitePublicoOut)
+        r = client.post(f"/convites/{token}/aceitar", json={"nome": "Pessoa Schemas", "senha": "senha-de-teste-schemas"})
+        contexto = auth_actions.UsuarioContexto(id=0, email=email, nome="x", nivel="plataforma", papel="membro",
+                                                tomador_id=None, prestador_id=None)
+        _confere_resposta("POST /convites/{token}/aceitar", r, auth_actions.emitir_token(contexto), TokenOut,
+                          ignorar=("access_token", "expira_em"))
+        assert r.json()["access_token"] and r.json()["expira_em"]
+    finally:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email,))
+            conn.execute("DELETE FROM usuario WHERE lower(email) IN (%s, %s)", (email, f"plat-{email}"))
+
+
 def test_openapi_expoe_os_modelos():
     esquemas = client.get("/openapi.json").json()["components"]["schemas"]
     for nome in ("SaudeOut", "TipoOut", "ResultadoBuscaOut", "LoteCriadoOut", "LoteOut", "ConformidadeEmpresaOut",
@@ -450,6 +485,10 @@ COMPARACOES = {
     "GET /contratos": ["test_organizacoes"],
     "POST /auth/login": ["test_auth_login_e_me"],
     "GET /auth/me": ["test_auth_login_e_me"],
+    "POST /convites": ["test_convites"],
+    "GET /convites": ["test_convites"],
+    "GET /convites/{token}": ["test_convites"],
+    "POST /convites/{token}/aceitar": ["test_convites"],
 }
 
 

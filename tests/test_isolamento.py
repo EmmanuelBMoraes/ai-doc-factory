@@ -33,14 +33,17 @@ LEITURA = {"GET", "HEAD", "OPTIONS"}
 
 # ---------- classificação automática das rotas ----------
 
-ABERTAS = {"/health", "/auth/login", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+# /convites/{token} e /convites/{token}/aceitar são públicas de propósito: o token de uso único é a credencial.
+ABERTAS = {"/health", "/auth/login", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect",
+           "/convites/{token}", "/convites/{token}/aceitar"}
 EXPLICITAS = {  # rotas sem id de lote/documento no caminho, e as que têm mas não seguem a regra geral
     ("GET", "/auth/me"): "qualquer", ("GET", "/tipos"): "qualquer",
     ("GET", "/empresas"): "plataforma", ("GET", "/empresas/{cnpj:path}/conformidade"): "plataforma",
     ("GET", "/lotes/{lote_id}/conformidade"): "plataforma",
     ("POST", "/tomadores"): "plataforma", ("GET", "/tomadores"): "plataforma",
     ("POST", "/prestadores"): "plataforma", ("GET", "/prestadores"): "plataforma",
-    ("POST", "/contratos"): "plataforma",
+    ("POST", "/contratos"): "plataforma", ("GET", "/convites"): "plataforma",
+    ("POST", "/convites"): "convidar",  # autenticada; quem convida quem é decidido por escopo.pode_convidar
     ("GET", "/contratos"): "lista", ("GET", "/documentos"): "lista", ("GET", "/revisao"): "lista",
     ("GET", "/busca"): "lista", ("POST", "/lotes"): "upload",
 }

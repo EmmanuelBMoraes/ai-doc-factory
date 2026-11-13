@@ -368,7 +368,8 @@ def test_cors_preflight_aceita_authorization():
 
 # ---------- varredura de rotas ----------
 
-ABERTAS = {"/health", "/auth/login", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+ABERTAS = {"/health", "/auth/login", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect",
+           "/convites/{token}", "/convites/{token}/aceitar"}  # as duas últimas: o token de convite é a credencial
 QUALQUER_USUARIO = {"/auth/me"}  # autenticada, mas sem exigir nível
 
 
@@ -396,7 +397,8 @@ def test_varredura_toda_rota_exige_token():
 # filtradas pelo escopo (a matriz completa e o isolamento estão em tests/test_isolamento.py).
 SO_PLATAFORMA = {("GET", "/empresas"), ("GET", "/empresas/{cnpj:path}/conformidade"),
                  ("GET", "/lotes/{lote_id}/conformidade"), ("POST", "/tomadores"), ("GET", "/tomadores"),
-                 ("POST", "/prestadores"), ("GET", "/prestadores"), ("POST", "/contratos")}
+                 ("POST", "/prestadores"), ("GET", "/prestadores"), ("POST", "/contratos"),
+                 ("GET", "/convites")}  # POST /convites: 403 vem de escopo.pode_convidar (tests/test_convites.py)
 
 
 @pytest.mark.parametrize("nivel", ["tomador", "prestador"])
