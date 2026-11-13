@@ -574,3 +574,31 @@ def test_get_usuarios_por_organizacao(mundo):
                    mundo.usuario("prestador", "membro", prestador_id=p)):
         assert client.get("/usuarios", headers=_h_id(membro)).status_code == 403
     assert client.get("/usuarios").status_code == 401
+
+
+def test_segundo_convite_do_cliente_nao_entra_depois_que_o_prestador_ja_tem_alguem(mundo):
+    """O cliente A cria dois convites de admin enquanto o prestador não tem ninguém. Aceito o primeiro, o segundo não
+    pode mais entrar: a pessoa veria os contratos do prestador com outros clientes (aqui, o cliente B)."""
+    ta, ua = mundo.admin_tomador()
+    tb, _ = mundo.admin_tomador()
+    p = mundo.prestador()
+    mundo.contrato(ta, p)
+    primeiro = mundo.convidar(_h_id(ua), nivel="prestador", papel="admin", prestador_id=p).json()
+    segundo = mundo.convidar(_h_id(ua), nivel="prestador", papel="admin", prestador_id=p).json()
+    assert _aceitar(primeiro["token"]).status_code == 200
+    mundo.contrato(tb, p)
+    r = _aceitar(segundo["token"])
+    assert r.status_code == 404 and r.json() == {"detail": "convite inválido, usado ou expirado"}
+    assert mundo.db.execute("SELECT count(*) FROM usuario WHERE prestador_id = %s", (p,)).fetchone()[0] == 1
+
+
+def test_admin_do_prestador_continua_convidando_colegas_depois_do_primeiro_acesso(mundo):
+    """A recusa acima vale só para convite criado por cliente; o do próprio prestador entra normalmente."""
+    ta, ua = mundo.admin_tomador()
+    p = mundo.prestador()
+    mundo.contrato(ta, p)
+    assert _aceitar(mundo.convidar(_h_id(ua), nivel="prestador", papel="admin", prestador_id=p).json()["token"]
+                    ).status_code == 200
+    admin_p = mundo.db.execute("SELECT id FROM usuario WHERE prestador_id = %s", (p,)).fetchone()[0]
+    colega = mundo.convidar(_h_id(admin_p), nivel="prestador", papel="membro", prestador_id=p).json()
+    assert _aceitar(colega["token"]).status_code == 200

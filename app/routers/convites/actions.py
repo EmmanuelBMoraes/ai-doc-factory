@@ -9,7 +9,7 @@ import psycopg
 from fastapi import HTTPException
 
 from app import config, senhas
-from app.escopo import motivo_recusa_convite
+from app.escopo import motivo_recusa_convite, prestador_tem_usuario_ativo
 from app.routers.auth.actions import UsuarioContexto, emitir_token
 from app.routers.convites.schemas import AceiteIn, NovoConvite
 
@@ -126,13 +126,18 @@ def aceitar(token: str, corpo: AceiteIn) -> dict:
             # Atômico: dois aceites simultâneos disputam a mesma linha; o segundo reavalia `usado_em IS NULL` e perde.
             convite = conn.execute(
                 f"UPDATE convite c SET usado_em = now() WHERE c.token_hash = %s AND {_UTILIZAVEL} "
-                "RETURNING c.id, c.email, c.nivel, c.papel, c.tomador_id, c.prestador_id",
+                "RETURNING c.id, c.email, c.nivel, c.papel, c.tomador_id, c.prestador_id, "
+                "EXISTS (SELECT 1 FROM usuario u WHERE u.id = c.criado_por AND u.nivel = 'tomador')",
                 (hash_token(token),)).fetchone()
             if convite is None:
                 raise _nao_encontrado()
-            id_convite, email, nivel, papel, tomador_id, prestador_id = convite
+            id_convite, email, nivel, papel, tomador_id, prestador_id, criado_por_tomador = convite
             if prestador_id is not None:
                 travar_prestador(conn, prestador_id)  # serializa com a checagem de escopo.pode_convidar
+                # Convite de prestador criado por um CLIENTE só serve para o primeiro acesso: se o prestador já tem
+                # alguém, a pessoa veria os contratos dele com outros clientes. Recusa sem gastar o convite.
+                if criado_por_tomador and prestador_tem_usuario_ativo(conn, prestador_id):
+                    raise _nao_encontrado()
             usuario_id = conn.execute(
                 "INSERT INTO usuario (email, nome, senha_hash, nivel, papel, tomador_id, prestador_id) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
