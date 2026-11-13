@@ -15,6 +15,13 @@ Nivel = Literal["plataforma", "tomador", "prestador"]  # espelha config.NIVEIS_A
 Papel = Literal["admin", "membro"]  # espelha config.PAPEIS
 
 
+def validar_email(v: str) -> str:
+    v = v.strip().lower()
+    if len(v) > EMAIL_MAX or not _FORMATO_EMAIL.match(v):
+        raise ValueError("e-mail inválido")
+    return v
+
+
 class NovoConvite(BaseModel):
     email: str
     nivel: Nivel
@@ -25,10 +32,7 @@ class NovoConvite(BaseModel):
     @field_validator("email")
     @classmethod
     def _email(cls, v: str) -> str:
-        v = v.strip().lower()
-        if len(v) > EMAIL_MAX or not _FORMATO_EMAIL.match(v):
-            raise ValueError("e-mail inválido")
-        return v
+        return validar_email(v)
 
     @model_validator(mode="after")
     def _vinculo(self):

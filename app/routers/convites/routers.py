@@ -7,7 +7,6 @@ from app.routers.convites.schemas import (
     AceiteIn, ConviteCriadoOut, ConviteOut, ConvitePublicoOut, NovoConvite)
 
 router = APIRouter(tags=["Convites"])  # autenticada (api.py): quem pode convidar é decidido por pode_convidar
-router_plataforma = APIRouter(tags=["Convites"])  # só plataforma (api.py)
 router_publico = APIRouter(tags=["Convites"])  # sem login: o token é a credencial
 
 
@@ -17,9 +16,10 @@ def criar_convite(corpo: NovoConvite, usuario: UsuarioContexto = Depends(exigir_
     return actions.criar(corpo, usuario)
 
 
-@router_plataforma.get("/convites", response_model=list[ConviteOut])
-def listar_convites():
-    return actions.listar()
+@router.get("/convites", response_model=list[ConviteOut])
+def listar_convites(usuario: UsuarioContexto = Depends(exigir_usuario)):
+    """Plataforma: todos. Admin de tomador/prestador: os criados por usuários da própria organização. Membro: 403."""
+    return actions.listar(usuario)
 
 
 @router_publico.get("/convites/{token}", response_model=ConvitePublicoOut)

@@ -37,7 +37,11 @@ from app.routers.organizacoes import actions as org_actions
 from app.routers.organizacoes.schemas import ContratoOut, PrestadorOut, TomadorOut
 from app.routers.revisao import actions as rev_actions
 from app.routers.revisao.schemas import ItemFilaRevisaoOut, Revisao, RevisaoOut
+from app.routers.terceirizadas import actions as terc_actions
+from app.routers.terceirizadas.schemas import TerceirizadaOut
 from app.routers.tipos import actions as tipos_actions
+from app.routers.usuarios import actions as usu_actions
+from app.routers.usuarios.schemas import UsuarioListadoOut
 from app.routers.tipos.schemas import TipoOut
 
 client = TestClient(app)
@@ -430,10 +434,10 @@ def test_convites(auth_real):
         r = client.post("/convites", headers=h, json={"email": email, "nivel": "plataforma", "papel": "membro"})
         assert r.status_code == 201
         token = r.json()["token"]
-        listado = next(c for c in conv_actions.listar() if c["id"] == r.json()["id"])
+        listado = next(c for c in conv_actions.listar(PLATAFORMA) if c["id"] == r.json()["id"])
         crua = {k: listado[k] for k in ("id", "email", "nivel", "papel", "expira_em")} | {"token": token}
         _confere_resposta("POST /convites", r, crua, ConviteCriadoOut, status=201)
-        _confere_resposta("GET /convites", client.get("/convites", headers=h), conv_actions.listar(), ConviteOut)
+        _confere_resposta("GET /convites", client.get("/convites", headers=h), conv_actions.listar(PLATAFORMA), ConviteOut)
         r = client.get(f"/convites/{token}")
         _confere_resposta("GET /convites/{token}", r, conv_actions.consultar(token), ConvitePublicoOut)
         r = client.post(f"/convites/{token}/aceitar", json={"nome": "Pessoa Schemas", "senha": "senha-de-teste-schemas"})
@@ -448,12 +452,44 @@ def test_convites(auth_real):
             conn.execute("DELETE FROM usuario WHERE lower(email) IN (%s, %s)", (email, f"plat-{email}"))
 
 
+def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch):
+    sufixo = uuid.uuid4().hex[:8]
+    email_plat, email_conv = f"schemas-plat-{sufixo}@exemplo.invalid", f"schemas-terc-{sufixo}@exemplo.invalid"
+    tomador = orgs.tomador()
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        uid = conn.execute("INSERT INTO usuario (email, nome, nivel, papel) VALUES (%s, 'Plat Schemas', 'plataforma', "
+                           "'admin') RETURNING id", (email_plat,)).fetchone()[0]
+    h = {"Authorization": "Bearer " + auth_actions.emitir_token(auth_actions.UsuarioContexto(
+        id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
+        prestador_id=None))["access_token"]}
+    gravado = []
+    real = terc_actions.cadastrar
+    monkeypatch.setattr(terc_actions, "cadastrar", lambda *a, **k: gravado.append(real(*a, **k)) or gravado[-1])
+    try:
+        r = client.post("/terceirizadas", headers=h, json={
+            "cnpj": "11.222.333/0001-81", "razao_social": "Schemas " + sufixo, "email": email_conv,
+            "tomador_id": tomador})
+        orgs.registrar("prestador", r.json()["prestador"]["id"])
+        orgs.registrar("contrato", r.json()["contrato"]["id"])
+        corpo = _confere_resposta("POST /terceirizadas", r, gravado[0], TerceirizadaOut, status=201)
+        assert corpo["acesso"] == "convite_criado" and corpo["convite"]["token"]
+        r = client.get("/usuarios", headers=h)
+        _confere_resposta("GET /usuarios", r, usu_actions.listar(auth_actions.UsuarioContexto(
+            id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
+            prestador_id=None)), UsuarioListadoOut)
+        assert "senha_hash" not in r.text and uid in [u["id"] for u in r.json()]
+    finally:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email_conv,))
+            conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
+
+
 def test_openapi_expoe_os_modelos():
     esquemas = client.get("/openapi.json").json()["components"]["schemas"]
     for nome in ("SaudeOut", "TipoOut", "ResultadoBuscaOut", "LoteCriadoOut", "LoteOut", "ConformidadeEmpresaOut",
                  "ConformidadeLoteOut", "EmpresaResumoOut", "DocumentoOut", "DocumentosAgrupadosOut",
                  "AnalisePontoOut", "ItemFilaRevisaoOut", "RevisaoOut", "TokenOut", "UsuarioOut",
-                 "EventoProgressoOut", "ContagensPontoOut", "TomadorOut", "PrestadorOut", "ContratoOut"):
+                 "EventoProgressoOut", "ContagensPontoOut", "TomadorOut", "PrestadorOut", "ContratoOut", "UsuarioListadoOut", "TerceirizadaOut"):
         assert nome in esquemas, nome
 
 
@@ -483,6 +519,8 @@ COMPARACOES = {
     "GET /prestadores": ["test_organizacoes"],
     "POST /contratos": ["test_organizacoes"],
     "GET /contratos": ["test_organizacoes"],
+    "GET /usuarios": ["test_terceirizadas_e_usuarios"],
+    "POST /terceirizadas": ["test_terceirizadas_e_usuarios"],
     "POST /auth/login": ["test_auth_login_e_me"],
     "GET /auth/me": ["test_auth_login_e_me"],
     "POST /convites": ["test_convites"],

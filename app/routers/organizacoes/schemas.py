@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -81,3 +81,4 @@ class ContratoOut(BaseModel):
     prestador_razao_social: str
     prestador_cnpj: str
     prestador_ativo: bool
+    acesso_prestador: Literal["ativo", "convite_pendente", "sem_acesso"]  # usuário ativo / convite pendente / nada
