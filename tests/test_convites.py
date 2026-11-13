@@ -413,3 +413,15 @@ def test_log_de_acesso_do_uvicorn_nao_mostra_o_token_do_caminho():
     outro = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, '%s "%s %s"', ("c", "GET", "/convites"), None)
     filtro[0].filter(outro)
     assert outro.getMessage() == 'c "GET /convites"'
+
+
+def test_token_invalido_no_aceite_nao_chega_ao_scrypt(monkeypatch):
+    """Rota pública: um token falso não pode custar o hash da senha (scrypt é lento de propósito)."""
+    from app.routers.convites import actions as convite_actions
+
+    def proibido(*_a, **_k):
+        raise AssertionError("gerar_hash chamado para token inválido")
+
+    monkeypatch.setattr(convite_actions.senhas, "gerar_hash", proibido)
+    r = _aceitar("token-que-nao-existe-" + uuid.uuid4().hex)
+    assert r.status_code == 404 and r.json() == {"detail": "convite inválido, usado ou expirado"}

@@ -90,6 +90,9 @@ def aceitar(token: str, corpo: AceiteIn) -> dict:
         raise HTTPException(503, "autenticação não configurada: defina AUTH_SEGREDO")
     if len(token) > TOKEN_MAX:
         raise _nao_encontrado()
+    # Rota pública: confere o convite ANTES do scrypt, para um token falso não custar CPU do servidor.
+    # A checagem que vale continua sendo o UPDATE atômico abaixo.
+    consultar(token)
     senha_hash = senhas.gerar_hash(corpo.senha)  # fora da transação: o scrypt é lento
     try:
         with psycopg.connect(config.DATABASE_URL) as conn:  # uma transação: cria o usuário e gasta o convite, ou nada
