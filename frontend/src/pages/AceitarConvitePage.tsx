@@ -88,7 +88,7 @@ const AceitarConvitePage: React.FC<AceitarConvitePageProps> = ({ onSuccess }) =>
         {estado === 'ok' && convite && (
           <form onSubmit={enviar} className="space-y-4" aria-label="Criar acesso">
             <p className="text-sm text-center text-[#6f6379] dark:text-[#9f91a6]">
-              Você foi convidado para{' '}
+              Você recebeu um convite para{' '}
               <strong className="text-[#2d0a33] dark:text-white">{convite.organizacao_nome ?? NIVEL_ROTULO[convite.nivel] ?? 'a equipe'}</strong>.
             </p>
             <div>
