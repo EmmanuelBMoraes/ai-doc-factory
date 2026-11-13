@@ -11,8 +11,10 @@ interface HeaderProps {
   onOpenUpload: () => void
   onOpenReview: () => void
   reviewCount: number
-  activeTab: 'documentos' | 'revisao'
-  onSelectTab: (tab: 'documentos' | 'revisao') => void
+  activeTab: 'documentos' | 'revisao' | 'organizacoes'
+  onSelectTab: (tab: 'documentos' | 'revisao' | 'organizacoes') => void
+  /** Só o nível plataforma vê a tela de Organizações. */
+  showOrganizacoes?: boolean
   globalSearch: string
   onGlobalSearchChange: (value: string) => void
   lotes?: TrackedLote[]
@@ -37,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   //reviewCount,
   activeTab,
   onSelectTab,
+  showOrganizacoes = false,
   // globalSearch,
   // onGlobalSearchChange,
   lotes = [],
@@ -76,6 +79,20 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Documentos
             </button>
+
+            {showOrganizacoes && (
+              <button
+                type="button"
+                onClick={() => onSelectTab('organizacoes')}
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'organizacoes'
+                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
+                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+                }`}
+              >
+                Organizações
+              </button>
+            )}
 
             {/* 
             <button

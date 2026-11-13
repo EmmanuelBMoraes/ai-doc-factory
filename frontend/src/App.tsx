@@ -6,11 +6,12 @@ import HomePage from './pages/HomePage'
 import CategoryPage from './pages/CategoryPage'
 import ManualReviewPage, { OFFICIAL_CATEGORY_OPTIONS } from './pages/ManualReviewPage'
 import LoginPage from './pages/LoginPage'
+import OrganizacoesPage from './pages/OrganizacoesPage'
 import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
 import { LotesStatusPanel } from './components/LotesStatusPanel'
 import { trackedStatus } from './hooks/lotePollingLogic'
 import { useLotePolling } from './hooks/useLotePolling'
-import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse } from './services/api'
+import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse, type UsuarioAtual } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
 
@@ -60,7 +61,10 @@ export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => authToken.get() !== null)
 
   // Navigation view state: 'home' | 'categoria' | 'revisao'
-  const [currentView, setCurrentView] = useState<'home' | 'categoria' | 'revisao'>('home')
+  const [currentView, setCurrentView] = useState<'home' | 'categoria' | 'revisao' | 'organizacoes'>('home')
+
+  // Usuário logado: o nível decide o que aparece (Organizações e contrato obrigatório no upload)
+  const [usuario, setUsuario] = useState<UsuarioAtual | null>(null)
 
   // Data states
   const [categories, setCategories] = useState<DocumentCategory[]>([])
@@ -100,6 +104,7 @@ export function App() {
   useEffect(() => {
     const handleExpired = () => {
       setIsAuthenticated(false)
+      setUsuario(null)
       setCategories([])
       setDetailedDocs([])
       setReviewPendingDocs([])
@@ -296,6 +301,20 @@ export function App() {
 
   useEffect(() => {
     if (!isAuthenticated) return
+    let cancelado = false
+    apiService
+      .getMe()
+      .then((u) => {
+        if (!cancelado) setUsuario(u)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelado = true
+    }
+  }, [isAuthenticated])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
     const timer = setTimeout(() => {
       void fetchData(false)
     }, 0)
@@ -482,9 +501,9 @@ export function App() {
     setIsTrackerOpen(true)
   }
 
-  const handleUploadFiles = (selectedFiles: File[]) => {
+  const handleUploadFiles = (selectedFiles: File[], contratoId: number | null) => {
     setIsTrackerOpen(true)
-    uploadLotes(selectedFiles)
+    uploadLotes(selectedFiles, contratoId)
   }
 
   // Active documents for the category view
@@ -521,12 +540,18 @@ export function App() {
         onOpenUpload={() => setIsUploadModalOpen(true)}
         onOpenReview={handleOpenReview}
         reviewCount={reviewCount}
-        activeTab={currentView === 'revisao' ? 'revisao' : 'documentos'}
+        activeTab={
+          currentView === 'revisao' ? 'revisao' : currentView === 'organizacoes' ? 'organizacoes' : 'documentos'
+        }
+        showOrganizacoes={usuario?.nivel === 'plataforma'}
         onSelectTab={(tab) => {
           if (tab === 'documentos') {
             handleBackToHome()
           } else if (tab === 'revisao') {
             handleOpenReview()
+          } else if (tab === 'organizacoes') {
+            setCurrentView('organizacoes')
+            window.scrollTo({ top: 0, behavior: 'smooth' })
           }
         }}
         globalSearch={globalSearch}
@@ -607,6 +632,10 @@ export function App() {
               />
             )}
 
+            {currentView === 'organizacoes' && usuario?.nivel === 'plataforma' && (
+              <OrganizacoesPage onBack={handleBackToHome} />
+            )}
+
             {/* VIEW 3: HOME PRINCIPAL (Pastas) */}
             {currentView === 'home' && (
               <HomePage
@@ -633,6 +662,7 @@ export function App() {
         onClose={() => setIsUploadModalOpen(false)}
         onSuccessUpload={handleUploadSuccess}
         onUploadFiles={handleUploadFiles}
+        contratoObrigatorio={usuario?.nivel === 'prestador'}
       />
     </div>
   )
