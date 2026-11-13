@@ -34,6 +34,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [contratos, setContratos] = useState<Contrato[]>([])
   const [contratoId, setContratoId] = useState<string>('')
   const [contratosErro, setContratosErro] = useState<string | null>(null)
+  const [contratosCarregados, setContratosCarregados] = useState(false)
 
   useEffect(() => {
     if (!isOpen) return
@@ -43,7 +44,15 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       .then((lista) => {
         if (cancelado) return
         setContratosErro(null)
-        setContratos(lista.filter(contratoUtilizavel))
+        const utilizaveis = lista.filter(contratoUtilizavel)
+        setContratos(utilizaveis)
+        setContratosCarregados(true)
+        // Mantém a escolha se ainda vale; prestador com um único contrato ativo já vem com ele selecionado.
+        setContratoId((atual) => {
+          if (atual !== '' && utilizaveis.some((c) => String(c.id) === atual)) return atual
+          if (contratoObrigatorio && utilizaveis.length === 1) return String(utilizaveis[0].id)
+          return ''
+        })
       })
       .catch((err) => {
         if (!cancelado) setContratosErro(err instanceof Error ? err.message : 'Erro ao listar contratos')
@@ -51,7 +60,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     return () => {
       cancelado = true
     }
-  }, [isOpen])
+  }, [isOpen, contratoObrigatorio])
 
   if (!isOpen) return null
 
@@ -220,6 +229,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   </option>
                 ))}
               </select>
+              {contratoObrigatorio && contratosCarregados && contratos.length === 0 && (
+                <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">
+                  Nenhum contrato ativo disponível para envio. Fale com a equipe da plataforma.
+                </p>
+              )}
               {contratosErro && (
                 <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{contratosErro}</p>
               )}
