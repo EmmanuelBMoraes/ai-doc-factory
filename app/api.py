@@ -1,3 +1,6 @@
+import logging
+import re
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,6 +21,20 @@ from app.routers.organizacoes.routers import router_leitura as contratos_leitura
 from app.routers.revisao.routers import router as revisao
 from app.routers.saude.routers import router as saude
 from app.routers.tipos.routers import router as tipos
+
+
+
+class _OcultarTokenDeConvite(logging.Filter):
+    """O token de convite viaja no caminho (/convites/{token}[/aceitar]): não pode ir para o log de acesso."""
+    _TOKEN = re.compile(r"(/convites/)[^/?\s]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(self._TOKEN.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_OcultarTokenDeConvite())
 
 app = FastAPI(title="Document AI Factory")
 app.add_middleware(

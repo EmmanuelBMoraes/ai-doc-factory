@@ -2,6 +2,7 @@
 Contra o Postgres real; só valores falsos. O banco é compartilhado: cada teste usa e-mails e organizações próprios e
 apaga o que criou. O token só aparece aqui em variáveis locais e nunca em mensagem de asserção."""
 import hashlib
+import logging
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -401,3 +402,14 @@ def test_rotas_novas_estao_registradas_e_so_as_duas_por_token_sao_publicas():
             yield from chamadas(sub)
     publicas = {k for k, r in rotas.items() if k[1].startswith("/convites") and exigir_usuario not in set(chamadas(r.dependant))}
     assert publicas == {("GET", "/convites/{token}"), ("POST", "/convites/{token}/aceitar")}
+
+
+def test_log_de_acesso_do_uvicorn_nao_mostra_o_token_do_caminho():
+    registro = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
+                                 ("127.0.0.1:1", "POST", "/convites/SEGREDO123/aceitar", "1.1", 200), None)
+    filtro = [f for f in logging.getLogger("uvicorn.access").filters if type(f).__name__ == "_OcultarTokenDeConvite"]
+    assert len(filtro) == 1 and filtro[0].filter(registro)
+    assert "SEGREDO123" not in registro.getMessage() and "/convites/***/aceitar" in registro.getMessage()
+    outro = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, '%s "%s %s"', ("c", "GET", "/convites"), None)
+    filtro[0].filter(outro)
+    assert outro.getMessage() == 'c "GET /convites"'
