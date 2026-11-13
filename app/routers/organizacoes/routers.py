@@ -1,12 +1,14 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from app.routers.auth.actions import UsuarioContexto, exigir_usuario
 from app.routers.organizacoes import actions
 from app.routers.organizacoes.schemas import (
     ContratoOut, IdBanco, NovoContrato, NovoPrestador, NovoTomador, PrestadorOut, TomadorOut)
 
-router = APIRouter(tags=["Organizações"])
+router = APIRouter(tags=["Organizações"])  # só plataforma (api.py)
+router_leitura = APIRouter(tags=["Organizações"])  # leitura de contratos filtrada pelo escopo do usuário
 
 
 @router.post("/tomadores", status_code=201, response_model=TomadorOut)
@@ -34,8 +36,10 @@ def criar_contrato(corpo: NovoContrato):
     return actions.criar_contrato(corpo)
 
 
-@router.get("/contratos", response_model=list[ContratoOut])
+@router_leitura.get("/contratos", response_model=list[ContratoOut])
 def listar_contratos(tomador_id: Annotated[IdBanco | None, Query()] = None,
-                     prestador_id: Annotated[IdBanco | None, Query()] = None):
-    """Filtros opcionais por tomador e por prestador."""
-    return actions.listar_contratos(tomador_id, prestador_id)
+                     prestador_id: Annotated[IdBanco | None, Query()] = None,
+                     usuario: UsuarioContexto = Depends(exigir_usuario)):
+    """Filtros opcionais por tomador e por prestador. Plataforma vê todos; tomador, os do seu tomador;
+    prestador, só os ativos dele."""
+    return actions.listar_contratos(tomador_id, prestador_id, usuario)

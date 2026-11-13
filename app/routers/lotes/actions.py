@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 
 from app import config
+from app.escopo import exigir_contrato_de_upload
 from app.eventos import (
     canal_lote,
     limpar_cancelado,
@@ -22,19 +23,22 @@ from app.eventos import (
 )
 from app.filas import enfileirar
 from app.routers import r
+from app.routers.auth.actions import UsuarioContexto
 
 log = logging.getLogger(__name__)
 STREAM_TETO_SEGUNDOS = 900  # tempo real máximo (time.monotonic) de uma conexão SSE
 
 
-def validar_contrato(contrato_id: int | None) -> None:
-    """404 se o contrato não existe; 409 se ele, o tomador ou o prestador estão inativos.
-    Sem contrato_id nada é validado: o lote fica sem contrato.
-    Por enquanto só a plataforma envia lotes, então o contrato é opcional. Quando o prestador ganhar acesso ao
-    upload, o contrato passará a ser obrigatório para ele (e o lote sem contrato continuará só da plataforma)."""
-    if contrato_id is None:
-        return
+def validar_contrato(contrato_id: int | None, usuario: UsuarioContexto | None = None) -> None:
+    """Prestador: contrato_id obrigatório (422) e contrato dele ativo (senão 404, sem revelar existência).
+    Plataforma (ou `usuario` None, uso interno): sem contrato_id nada é validado e o lote fica sem contrato
+    (lote sem contrato é só da plataforma); com ele, 404 se não existe e 409 se ele, o tomador ou o prestador
+    estão inativos."""
     with psycopg.connect(config.DATABASE_URL) as conn:
+        if usuario is not None:
+            exigir_contrato_de_upload(conn, usuario, contrato_id)
+        if contrato_id is None:
+            return
         linha = conn.execute(
             "SELECT c.ativo, t.ativo, p.ativo FROM contrato c "
             "JOIN tomador t ON t.id = c.tomador_id JOIN prestador p ON p.id = c.prestador_id WHERE c.id = %s",

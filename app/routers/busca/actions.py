@@ -2,6 +2,8 @@ import psycopg
 
 from app import config
 from app.anonimizacao import mascarar_documentos
+from app.escopo import condicao_lote
+from app.routers.auth.actions import UsuarioContexto
 
 _OPCOES = "StartSel=<b>, StopSel=</b>, MaxFragments=2, MaxWords=25, MinWords=8"
 
@@ -9,20 +11,22 @@ _OPCOES = "StartSel=<b>, StopSel=</b>, MaxFragments=2, MaxWords=25, MinWords=8"
 # A expressão to_tsvector('portuguese', coalesce(texto, '')) precisa ser idêntica à do índice pagina_texto_fts_idx.
 # A busca acontece no texto original (achar por nome ou CPF segue funcionando); o trecho devolvido é montado
 # sobre o texto com CPF, RG e PIS mascarados, para a resposta não revelar o identificador.
-def buscar(q: str, limite: int) -> list[dict]:
+def buscar(q: str, limite: int, usuario: UsuarioContexto | None = None) -> list[dict]:
+    """`usuario` None = sem filtro (uso interno e testes); a rota sempre passa o usuário."""
+    cond, cargs = condicao_lote(usuario) if usuario is not None else ("TRUE", [])
     with psycopg.connect(config.DATABASE_URL) as conn:
         linhas = conn.execute(
-            """
+            f"""
             SELECT p.lote_id, p.numero, p.documento_id, d.tipo, l.nome_arquivo, coalesce(p.texto, '')
               FROM pagina p
               JOIN lote l ON l.id = p.lote_id
               LEFT JOIN documento d ON d.id = p.documento_id,
                    websearch_to_tsquery('portuguese', %s) AS query
-             WHERE to_tsvector('portuguese', coalesce(p.texto, '')) @@ query
+             WHERE to_tsvector('portuguese', coalesce(p.texto, '')) @@ query AND {cond}
              ORDER BY ts_rank(to_tsvector('portuguese', coalesce(p.texto, '')), query) DESC, p.lote_id, p.numero
              LIMIT %s
             """,
-            (q, limite),
+            (q, *cargs, limite),
         ).fetchall()
         saida = []
         for lote_id, numero, doc_id, tipo, arquivo, texto in linhas:

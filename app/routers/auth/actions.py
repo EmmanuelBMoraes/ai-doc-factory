@@ -104,8 +104,7 @@ def exigir_usuario(credenciais: HTTPAuthorizationCredentials | None = Depends(be
 
 
 def exigir_plataforma(usuario: UsuarioContexto = Depends(exigir_usuario)) -> UsuarioContexto:
-    """Falha fechada até existir o filtro de dados por organização: só a equipe da plataforma acessa os dados."""
+    """Rotas só da equipe da plataforma (criação de organizações, conformidade por empresa)."""
     if usuario.nivel != "plataforma":
-        raise HTTPException(403, "acesso indisponível para este nível de usuário: o acesso de tomadores e "
-                                 "prestadores aos dados ainda não está disponível")
+        raise HTTPException(403, "acesso restrito à plataforma")
     return usuario
