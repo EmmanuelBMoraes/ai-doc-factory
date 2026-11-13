@@ -19,7 +19,7 @@ provider "google" {
   region  = var.region
   zone    = var.zone
 
-  # Exigido pela API de orçamentos com credencial de usuário.
+  # Cota faturada no próprio projeto, exigido por algumas APIs com credencial de usuário.
   user_project_override = true
   billing_project       = var.project_id
 }

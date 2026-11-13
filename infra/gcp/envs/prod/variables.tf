@@ -51,15 +51,3 @@ variable "ssh_source_ranges" {
 variable "enable_snapshots" {
   type = bool
 }
-
-variable "billing_account_id" {
-  type = string
-}
-
-variable "budget_amount" {
-  type = number
-}
-
-variable "budget_currency" {
-  type = string
-}

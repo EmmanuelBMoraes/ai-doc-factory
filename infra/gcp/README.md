@@ -37,7 +37,6 @@ Documentação de ponta a ponta da infraestrutura no Google Cloud: o que foi con
 | CD | GitHub Actions `deploy`: build, push e deploy via SSH pelo IAP |
 | Autenticação CI → GCP | Workload Identity Federation (OIDC), sem chave JSON |
 | Backup | Snapshot diário do disco, retenção de 7 dias |
-| Controle de custo | Alerta de orçamento (opcional) |
 
 Nada do código da aplicação foi alterado. A infraestrutura usa o `docker-compose.yml` existente e aplica por cima um arquivo de override, gerado na VM.
 
@@ -136,7 +135,6 @@ infra/gcp/
     github_wif/                pool/provider OIDC e SA de deploy
     compute/                   VM, bootstrap e snapshots
       templates/startup.sh.tftpl
-    budget/                    alerta de orçamento
 ```
 
 Arquivos ignorados pelo git: `.terraform/`, `*.tfstate*`, `*.local.tfvars`, `backend.hcl`, `.env` e `.env.*` (exceto `.env.example`).
@@ -147,7 +145,7 @@ Arquivos ignorados pelo git: `.terraform/`, `*.tfstate*`, `*.local.tfvars`, `bac
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `versions.tf` | Exige Terraform >= 1.5 e provider `google ~> 6.0`. Backend `gcs` com `prefix = ai-doc-factory/prod`; o bucket vem do `backend.hcl`. `user_project_override`/`billing_project` são exigidos pela API de orçamentos quando se usa credencial de usuário. |
+| `versions.tf` | Exige Terraform >= 1.5 e provider `google ~> 6.0`. Backend `gcs` com `prefix = ai-doc-factory/prod`; o bucket vem do `backend.hcl`. `user_project_override`/`billing_project` cobram a cota no próprio projeto, exigido por algumas APIs quando se usa credencial de usuário. |
 | `main.tf` | Habilita as APIs, cria a SA da VM (`<name>-vm`) com permissão de escrever logs e métricas, calcula o domínio (`var.domain` ou `<ip>.sslip.io`) e instancia os módulos. |
 | `variables.tf` | Só tipos, sem valores padrão: tudo vem do `terraform.tfvars`. |
 | `terraform.tfvars` | Valores do ambiente (ver 8.1). |
@@ -163,7 +161,6 @@ APIs habilitadas pelo `main.tf`:
 | `iam`, `iamcredentials`, `sts` | Service accounts e troca de token do WIF |
 | `iap` | Túnel SSH |
 | `oslogin` | Login SSH controlado por IAM |
-| `billingbudgets` | Alerta de orçamento |
 | `cloudresourcemanager` | Leitura do projeto e bindings de IAM |
 
 ### 5.2 `modules/network`
@@ -218,10 +215,6 @@ Saídas: `provider_name`, `service_account_email`, `member`.
 | `google_compute_disk_resource_policy_attachment.snapshots` | Liga a agenda ao disco de boot. |
 
 Variáveis do template: `repo_url`, `secret_id`, `domain`, `acme_email`, `registry_host`, `registry_url`.
-
-### 5.7 `modules/budget`
-
-Cria um `google_billing_budget` filtrado pelo projeto, com alertas por e-mail em 50%, 90% e 100% do valor. Usa `EXCLUDE_ALL_CREDITS`, ou seja, compara o **gasto bruto**: com os créditos do trial descontados, o gasto líquido seria zero e o alerta nunca dispararia. Só é criado se `billing_account_id` estiver preenchido.
 
 ## 6. Bootstrap da VM e `deploy.sh`
 
@@ -314,9 +307,6 @@ Não há **GitHub Secrets**: com WIF, nenhuma credencial fica no GitHub.
 | `acme_email` | `""` | E-mail de avisos do Let's Encrypt |
 | `ssh_source_ranges` | `["35.235.240.0/20"]` | Origens com SSH (padrão: só IAP) |
 | `enable_snapshots` | `true` | Snapshot diário do disco |
-| `billing_account_id` | `""` | Conta de faturamento para o alerta. Vazio não cria o alerta |
-| `budget_amount` | `300` | Valor do alerta |
-| `budget_currency` | `BRL` | Precisa ser igual à moeda da conta de faturamento |
 
 O `terraform.tfvars` é carregado automaticamente por `plan`/`apply`/`destroy`, sem `-var-file`. Para valores só seus, sem versionar, crie um `*.local.tfvars` e passe `-var-file=<arquivo>`; ele sobrescreve o `terraform.tfvars`.
 
@@ -420,9 +410,6 @@ gcloud billing projects link "$PROJECT_ID" --billing-account="$BILLING_ID"
 
 # APIs mínimas para o Terraform começar (o resto ele habilita)
 gcloud services enable serviceusage.googleapis.com cloudresourcemanager.googleapis.com storage.googleapis.com
-
-# Moeda da conta (vai para budget_currency)
-gcloud billing accounts describe "$BILLING_ID" --format='value(currencyCode)'
 ```
 
 ### 11.3 Credencial para o Terraform
@@ -455,10 +442,6 @@ project_id = "<PROJECT_ID>"
 # Se usar um fork, troque os dois:
 repo_url          = "https://github.com/<owner>/ai-doc-factory.git"
 github_repository = "<owner>/ai-doc-factory"
-
-billing_account_id = "<BILLING_ID>"   # ou "" para não criar alerta
-budget_amount      = 300
-budget_currency    = "BRL"            # a moeda do passo 11.2
 ```
 
 ### 11.6 Aplicar o Terraform
@@ -757,7 +740,6 @@ gcloud compute instances start ai-doc-factory --zone us-central1-a   # container
 | Frontend chama URL errada | `APP_URL` incorreta no build | Corrigir a variável no GitHub e rodar `deploy` |
 | Containers reiniciando, OCR lento | Falta de memória | `dmesg -T \| grep -i oom`; subir para `e2-standard-2` |
 | Smoke test falha logo após o deploy | `migrate` ainda rodando | `dc ps`; `dc logs migrate` |
-| `terraform apply` falha no budget | Moeda diferente da conta ou falta de quota project | Conferir `budget_currency`; rodar `set-quota-project` (11.3) |
 | Rede `default` não existe | Política da organização bloqueia a rede padrão | Criar a VPC `default` ou adaptar o módulo `network` |
 | Recriar o WIF após `destroy` falha | Pool excluído fica reservado por 30 dias | Trocar `pool_id` no módulo |
 

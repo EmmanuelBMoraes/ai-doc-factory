@@ -8,13 +8,10 @@ locals {
     "sts.googleapis.com",
     "iap.googleapis.com",
     "oslogin.googleapis.com",
-    "billingbudgets.googleapis.com",
     "cloudresourcemanager.googleapis.com",
   ]
   domain = var.domain != "" ? var.domain : "${replace(module.network.address, ".", "-")}.sslip.io"
 }
-
-data "google_project" "this" {}
 
 resource "google_project_service" "apis" {
   for_each           = toset(local.apis)
@@ -86,15 +83,4 @@ module "compute" {
   registry_url          = module.registry.url
   enable_snapshots      = var.enable_snapshots
   depends_on            = [module.secrets, module.registry, google_project_iam_member.vm]
-}
-
-module "budget" {
-  count              = var.billing_account_id != "" ? 1 : 0
-  source             = "../../modules/budget"
-  name               = "${var.name}-orcamento"
-  billing_account_id = var.billing_account_id
-  project_number     = data.google_project.this.number
-  amount             = var.budget_amount
-  currency           = var.budget_currency
-  depends_on         = [google_project_service.apis]
 }
