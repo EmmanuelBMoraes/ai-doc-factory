@@ -16,8 +16,7 @@ from fastapi.testclient import TestClient
 
 from app import config, senhas
 from app.api import app
-from app.escopo import pode_convidar
-from app.routers.auth.actions import UsuarioContexto, exigir_usuario
+from app.routers.auth.actions import exigir_usuario
 from conftest import cnpj_valido
 
 pytestmark = pytest.mark.usefixtures("auth_real")
@@ -184,9 +183,9 @@ def test_organizacao_inexistente_ou_inativa_da_404(mundo):
 
 
 @pytest.mark.parametrize("nivel", ["tomador", "prestador"])
-def test_tomador_e_prestador_nao_criam_convite_403(mundo, nivel):
+def test_membro_nao_cria_convite_403(mundo, nivel):
     vinculo = {"tomador_id": mundo.tomador} if nivel == "tomador" else {"prestador_id": mundo.prestador}
-    h = _h_id(mundo.usuario(nivel=nivel, papel="admin", **vinculo))
+    h = _h_id(mundo.usuario(nivel=nivel, papel="membro", **vinculo))
     r = mundo.convidar(headers=h)
     assert r.status_code == 403 and "token" not in r.json()
     assert mundo.db.execute("SELECT count(*) FROM convite WHERE lower(email) = ANY(%s)", (mundo.emails,)
@@ -198,23 +197,12 @@ def test_sem_token_criar_e_listar_da_401(mundo):
     assert client.get("/convites").status_code == 401
 
 
-def test_pode_convidar_hoje_libera_so_plataforma():
-    def u(nivel, papel="admin"):
-        return UsuarioContexto(id=1, email="a@b.invalid", nome="A", nivel=nivel, papel=papel,
-                               tomador_id=1 if nivel == "tomador" else None,
-                               prestador_id=1 if nivel == "prestador" else None)
-    assert pode_convidar(u("plataforma"), "prestador", "admin", None, 1)
-    assert pode_convidar(u("plataforma", "membro"), "tomador", "membro", 1, None)
-    for nivel in ("tomador", "prestador"):
-        assert not pode_convidar(u(nivel), nivel, "membro", u(nivel).tomador_id, u(nivel).prestador_id)
-
-
 # ---------- listagem ----------
 
-def test_listagem_so_plataforma(mundo):
+def test_listagem_membro_da_403(mundo):
     for nivel in ("tomador", "prestador"):
         vinculo = {"tomador_id": mundo.tomador} if nivel == "tomador" else {"prestador_id": mundo.prestador}
-        h = _h_id(mundo.usuario(nivel=nivel, **vinculo))
+        h = _h_id(mundo.usuario(nivel=nivel, papel="membro", **vinculo))
         assert client.get("/convites", headers=h).status_code == 403
 
 

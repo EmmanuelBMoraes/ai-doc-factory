@@ -42,7 +42,10 @@ EXPLICITAS = {  # rotas sem id de lote/documento no caminho, e as que têm mas n
     ("GET", "/lotes/{lote_id}/conformidade"): "plataforma",
     ("POST", "/tomadores"): "plataforma", ("GET", "/tomadores"): "plataforma",
     ("POST", "/prestadores"): "plataforma", ("GET", "/prestadores"): "plataforma",
-    ("POST", "/contratos"): "plataforma", ("GET", "/convites"): "plataforma",
+    ("POST", "/contratos"): "plataforma",
+    # Autenticadas; a action decide por nível e papel (admin da própria organização), fora do bloqueio de escrita do
+    # tomador de propósito: o admin do tomador gerencia terceirizadas e convites (testes em tests/test_terceirizadas.py).
+    ("GET", "/convites"): "organizacao", ("GET", "/usuarios"): "organizacao", ("POST", "/terceirizadas"): "organizacao",
     ("POST", "/convites"): "convidar",  # autenticada; quem convida quem é decidido por escopo.pode_convidar
     ("GET", "/contratos"): "lista", ("GET", "/documentos"): "lista", ("GET", "/revisao"): "lista",
     ("GET", "/busca"): "lista", ("POST", "/lotes"): "upload",
@@ -88,7 +91,7 @@ def test_toda_rota_esta_classificada():
     inexistentes = [k for k in EXPLICITAS if k not in set(todas)]
     assert not inexistentes, f"EXPLICITAS cita rota que não existe mais: {inexistentes}"
     tipos = {classificar(m, c) for m, c in todas}
-    assert {"aberta", "qualquer", "plataforma", "lista", "upload", "lote", "documento"} <= tipos
+    assert {"aberta", "qualquer", "plataforma", "lista", "upload", "lote", "documento", "organizacao"} <= tipos
 
 
 def test_estrutura_das_dependencias_de_cada_rota():
@@ -102,6 +105,8 @@ def test_estrutura_das_dependencias_de_cada_rota():
         assert exigir_usuario in chamadas, f"{metodo} {caminho} sem autenticação"
         if tipo == "plataforma":
             assert exigir_plataforma in chamadas, f"{metodo} {caminho} deveria ser só da plataforma"
+        if tipo == "organizacao":  # a action decide por nível e papel; o bloqueio de escrita do tomador não vale aqui
+            assert acesso_a_dados not in chamadas and exigir_plataforma not in chamadas, (metodo, caminho)
         if tipo in ("lista", "upload", "lote", "documento"):
             assert acesso_a_dados in chamadas, f"{metodo} {caminho} sem o bloqueio de escrita do tomador"
         if tipo in ("lote", "documento"):

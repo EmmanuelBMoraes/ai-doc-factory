@@ -38,11 +38,61 @@ def condicao_lote(usuario: UsuarioContexto, l: str = "l") -> tuple[str, list]:
             f"JOIN prestador pe ON pe.id = ce.prestador_id WHERE ce.id = {l}.contrato_id AND {cond})"), args
 
 
-def pode_convidar(usuario: UsuarioContexto, nivel: str, papel: str,
+_PRESTADOR_JA_TEM_ACESSO = "prestador já tem acesso; peça ao administrador dele para convidar"
+_PRESTADOR_COM_CONVITE_PENDENTE = "já há convite pendente para este prestador"
+_NEGADO_CONVITE = "sem permissão para criar este convite"
+
+
+def prestador_tem_usuario_ativo(conn, prestador_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM usuario WHERE prestador_id = %s AND ativo", (prestador_id,)).fetchone() is not None
+
+
+def prestador_tem_convite_pendente(conn, prestador_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM convite WHERE prestador_id = %s AND usado_em IS NULL AND expira_em > now()",
+                        (prestador_id,)).fetchone() is not None
+
+
+def motivo_recusa_convite(conn, usuario: UsuarioContexto, nivel: str, papel: str,
+                          tomador_id: int | None, prestador_id: int | None) -> str | None:
+    """Único lugar que decide quem pode convidar quem. None = permitido; senão, o motivo da recusa (403).
+
+    - plataforma: qualquer nível e papel.
+    - admin do tomador: tomador (o seu), admin ou membro; e prestador (admin) com contrato ATIVO com o seu tomador,
+      SÓ se o prestador não tem usuário ativo (senão a pessoa convidada veria os contratos do prestador com OUTROS
+      clientes) e não tem convite pendente de outra organização (idem, para o convite ainda não aceito).
+    - admin do prestador: prestador (o seu), admin ou membro.
+    - membros e qualquer outro caso: nada. Ninguém de fora da plataforma convida nível plataforma.
+    Quem chama deve manter a linha do prestador travada (FOR NO KEY UPDATE) para a checagem valer até o INSERT."""
+    if usuario.nivel == "plataforma":
+        return None
+    if usuario.papel != "admin":
+        return _NEGADO_CONVITE
+    if usuario.nivel == "tomador" and usuario.tomador_id is not None:
+        if nivel == "tomador":
+            return None if tomador_id == usuario.tomador_id else _NEGADO_CONVITE
+        if nivel == "prestador" and papel == "admin" and prestador_id is not None:
+            if conn.execute("SELECT 1 FROM contrato c JOIN tomador t ON t.id = c.tomador_id "
+                            "JOIN prestador p ON p.id = c.prestador_id "
+                            "WHERE c.tomador_id = %s AND c.prestador_id = %s AND c.ativo AND t.ativo AND p.ativo",
+                            (usuario.tomador_id, prestador_id)).fetchone() is None:
+                return _NEGADO_CONVITE
+            if prestador_tem_usuario_ativo(conn, prestador_id):
+                return _PRESTADOR_JA_TEM_ACESSO
+            if conn.execute(
+                    "SELECT 1 FROM convite c LEFT JOIN usuario u ON u.id = c.criado_por "
+                    "WHERE c.prestador_id = %s AND c.usado_em IS NULL AND c.expira_em > now() "
+                    "AND u.tomador_id IS DISTINCT FROM %s", (prestador_id, usuario.tomador_id)).fetchone():
+                return _PRESTADOR_COM_CONVITE_PENDENTE
+            return None
+        return _NEGADO_CONVITE
+    if usuario.nivel == "prestador" and usuario.prestador_id is not None:
+        return None if nivel == "prestador" and prestador_id == usuario.prestador_id else _NEGADO_CONVITE
+    return _NEGADO_CONVITE
+
+
+def pode_convidar(conn, usuario: UsuarioContexto, nivel: str, papel: str,
                   tomador_id: int | None, prestador_id: int | None) -> bool:
-    """Único lugar que decide quem pode convidar quem. Hoje só a plataforma convida (qualquer nível e papel);
-    o admin do tomador e o do prestador entram aqui, nos limites da própria organização."""
-    return usuario.nivel == "plataforma"
+    return motivo_recusa_convite(conn, usuario, nivel, papel, tomador_id, prestador_id) is None
 
 
 def _id_valido(id_: int) -> bool:

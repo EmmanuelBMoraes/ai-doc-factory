@@ -12,7 +12,11 @@ _COLUNAS_TOMADOR = "id, nome, cnpj, ativo, criado_em"
 _COLUNAS_PRESTADOR = "id, cnpj, razao_social, ativo, criado_em"
 _SELECT_CONTRATO = """
     SELECT c.id, c.tomador_id, c.prestador_id, c.ativo, c.vigencia_inicio, c.vigencia_fim, c.criado_em,
-           t.nome, t.ativo, p.razao_social, p.cnpj, p.ativo
+           t.nome, t.ativo, p.razao_social, p.cnpj, p.ativo,
+           CASE WHEN EXISTS (SELECT 1 FROM usuario u WHERE u.prestador_id = p.id AND u.ativo) THEN 'ativo'
+                WHEN EXISTS (SELECT 1 FROM convite cv WHERE cv.prestador_id = p.id AND cv.usado_em IS NULL
+                             AND cv.expira_em > now()) THEN 'convite_pendente'
+                ELSE 'sem_acesso' END
       FROM contrato c
       JOIN tomador t ON t.id = c.tomador_id
       JOIN prestador p ON p.id = c.prestador_id
@@ -29,7 +33,8 @@ def _prestador(l) -> dict:
 
 def _contrato(l) -> dict:
     return dict(zip(("id", "tomador_id", "prestador_id", "ativo", "vigencia_inicio", "vigencia_fim", "criado_em",
-                     "tomador_nome", "tomador_ativo", "prestador_razao_social", "prestador_cnpj", "prestador_ativo"), l))
+                     "tomador_nome", "tomador_ativo", "prestador_razao_social", "prestador_cnpj", "prestador_ativo",
+                     "acesso_prestador"), l))
 
 
 def _existente(consulta: str, args: tuple) -> int | None:
