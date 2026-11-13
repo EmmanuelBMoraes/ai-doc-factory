@@ -1,12 +1,15 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { X, UploadCloud, File, Loader2, AlertCircle, Trash2 } from 'lucide-react'
-import { apiService } from '../services/api'
+import { apiService, type Contrato } from '../services/api'
+import { contratoLabel, contratoUtilizavel } from '../utils/contratos'
 
 interface UploadModalProps {
   isOpen: boolean
   onClose: () => void
   onSuccessUpload: (filename: string, loteId: number) => void
-  onUploadFiles?: (files: File[]) => void
+  onUploadFiles?: (files: File[], contratoId: number | null) => void
+  /** Prestador precisa escolher um contrato; plataforma pode enviar sem contrato. */
+  contratoObrigatorio?: boolean
 }
 
 const ACCEPTED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.tif', '.tiff']
@@ -21,14 +24,48 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   onClose,
   onSuccessUpload,
   onUploadFiles,
+  contratoObrigatorio = false,
 }) => {
   const [files, setFiles] = useState<File[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [contratos, setContratos] = useState<Contrato[]>([])
+  const [contratoId, setContratoId] = useState<string>('')
+  const [contratosErro, setContratosErro] = useState<string | null>(null)
+  const [contratosCarregados, setContratosCarregados] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    let cancelado = false
+    apiService
+      .getContratos()
+      .then((lista) => {
+        if (cancelado) return
+        setContratosErro(null)
+        const utilizaveis = lista.filter(contratoUtilizavel)
+        setContratos(utilizaveis)
+        setContratosCarregados(true)
+        // Mantém a escolha se ainda vale; prestador com um único contrato ativo já vem com ele selecionado.
+        setContratoId((atual) => {
+          if (atual !== '' && utilizaveis.some((c) => String(c.id) === atual)) return atual
+          if (contratoObrigatorio && utilizaveis.length === 1) return String(utilizaveis[0].id)
+          return ''
+        })
+      })
+      .catch((err) => {
+        if (!cancelado) setContratosErro(err instanceof Error ? err.message : 'Erro ao listar contratos')
+      })
+    return () => {
+      cancelado = true
+    }
+  }, [isOpen, contratoObrigatorio])
 
   if (!isOpen) return null
+
+  const contratoSelecionado = contratoId === '' ? null : Number(contratoId)
+  const faltaContrato = contratoObrigatorio && contratoSelecionado === null
 
   const addFiles = (incomingFiles: FileList | File[]) => {
     const list = Array.from(incomingFiles)
@@ -104,6 +141,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   const handleUpload = async () => {
     if (files.length === 0 || isUploading) return
+    if (faltaContrato) {
+      setError('Selecione o contrato do lote.')
+      return
+    }
 
     // Fecha o modal imediatamente e delega o envio + acompanhamento em tempo real ao painel do Header
     if (onUploadFiles) {
@@ -112,7 +153,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       setError(null)
       setIsDragging(false)
       onClose()
-      onUploadFiles(selected)
+      onUploadFiles(selected, contratoSelecionado)
       return
     }
 
@@ -126,7 +167,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       for (let i = 0; i < files.length; i++) {
         const currentFile = files[i]
         setUploadProgress({ current: i + 1, total: files.length })
-        const response = await apiService.uploadLote(currentFile)
+        const response = await apiService.uploadLote(currentFile, contratoSelecionado)
         onSuccessUpload(currentFile.name, response.lote_id)
         remainingFiles.shift()
       }
@@ -167,6 +208,37 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         </p>
 
         <div className="mt-5 space-y-4">
+            <div>
+              <label
+                htmlFor="upload-contrato"
+                className="block text-xs font-semibold text-[#2d0a33] dark:text-white mb-1"
+              >
+                Contrato{contratoObrigatorio ? '' : ' (opcional)'}
+              </label>
+              <select
+                id="upload-contrato"
+                value={contratoId}
+                onChange={(e) => setContratoId(e.target.value)}
+                disabled={isUploading}
+                className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#150c18] border border-[#dcd4e2] dark:border-[#3d2948] text-[#2d0a33] dark:text-white focus:outline-none focus:ring-1 focus:ring-[#9333ea]"
+              >
+                <option value="">{contratoObrigatorio ? 'Selecione um contrato' : 'Sem contrato'}</option>
+                {contratos.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {contratoLabel(c)}
+                  </option>
+                ))}
+              </select>
+              {contratoObrigatorio && contratosCarregados && contratos.length === 0 && (
+                <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">
+                  Nenhum contrato ativo disponível para envio. Fale com a equipe da plataforma.
+                </p>
+              )}
+              {contratosErro && (
+                <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{contratosErro}</p>
+              )}
+            </div>
+
             <label
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -272,7 +344,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               </button>
               <button
                 type="button"
-                disabled={files.length === 0 || isUploading}
+                disabled={files.length === 0 || isUploading || faltaContrato}
                 onClick={handleUpload}
                 className="px-5 py-2 rounded-xl text-xs sm:text-sm font-bold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] disabled:opacity-50 flex items-center gap-2 shadow-sm transition-all cursor-pointer"
               >
