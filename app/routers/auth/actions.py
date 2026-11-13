@@ -71,7 +71,12 @@ def login(identificador: str, senha: str) -> dict:
             # Condição no hash antigo: não sobrescreve uma troca de senha feita no meio do caminho.
             conn.execute("UPDATE usuario SET senha_hash = %s WHERE id = %s AND senha_hash = %s",
                          (senhas.gerar_hash(senha), linha[0], hash_gravado))
-    usuario = _contexto(linha)
+    return emitir_token(_contexto(linha))
+
+
+def emitir_token(usuario: UsuarioContexto) -> dict:
+    """JWT no formato de /auth/login para um usuário já autenticado (login e aceite de convite)."""
+    _exigir_configuracao()
     agora = datetime.now(timezone.utc)
     expira = agora + timedelta(minutes=config.AUTH_EXPIRA_MIN)
     claims = {"sub": str(usuario.id), "nivel": usuario.nivel, "papel": usuario.papel,

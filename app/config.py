@@ -77,5 +77,8 @@ AUTH_SENHA = os.getenv("AUTH_SENHA", "")
 AUTH_SEGREDO = os.getenv("AUTH_SEGREDO", "")  # assina o JWT (HS256)
 AUTH_EXPIRA_MIN = int(os.getenv("AUTH_EXPIRA_MIN", "480"))
 
+# Convites: validade do link de uso único, em dias.
+CONVITE_VALIDADE_DIAS = int(os.getenv("CONVITE_VALIDADE_DIAS", "7"))
+
 # CORS: origens permitidas, separadas por vírgula (padrão: dev server do Vite). Nunca "*" com credenciais.
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]

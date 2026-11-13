@@ -18,7 +18,8 @@ TABELAS_SEM_EMPRESA = {"lote", "documento", "pagina", "perfil_jornada", "analise
 TABELAS = TABELAS_SEM_EMPRESA | {"empresa"}  # 0001_baseline
 TABELAS_ACESSO = {"tomador", "prestador", "contrato", "usuario"}  # migração 0002
 # migração 0004: `empresa` sai, `lote` ganha `contrato_id`
-TABELAS_HEAD = TABELAS_SEM_EMPRESA | TABELAS_ACESSO
+TABELAS_0004 = TABELAS_SEM_EMPRESA | TABELAS_ACESSO
+TABELAS_HEAD = TABELAS_0004 | {"convite"}  # migração 0005
 
 
 @pytest.fixture
@@ -75,6 +76,10 @@ def test_upgrade_head_cria_tabelas_e_downgrade_base_remove(banco_descartavel):
             "SELECT count(*) FROM pg_indexes WHERE indexname IN ('pagina_texto_fts_idx', 'empresa_nome_uniq')"
         ).fetchone()[0] == 1  # empresa_nome_uniq saiu com a tabela
     _alembic(url, "upgrade", "head")  # idempotente: já está no head
+    _alembic(url, "downgrade", "0004_lote_contrato")  # 0005 só cria `convite`
+    assert _tabelas(url) == TABELAS_0004
+    _alembic(url, "upgrade", "head")
+    assert _tabelas(url) == TABELAS_HEAD
     _alembic(url, "downgrade", "0002_modelo_acesso")  # recria `empresa` (vazia) e restaura o UNIQUE de sha256
     assert _tabelas(url) == TABELAS | TABELAS_ACESSO
     assert "empresa_id" in _colunas_lote(url) and "contrato_id" not in _colunas_lote(url)

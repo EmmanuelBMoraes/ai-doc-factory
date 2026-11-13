@@ -38,6 +38,13 @@ def condicao_lote(usuario: UsuarioContexto, l: str = "l") -> tuple[str, list]:
             f"JOIN prestador pe ON pe.id = ce.prestador_id WHERE ce.id = {l}.contrato_id AND {cond})"), args
 
 
+def pode_convidar(usuario: UsuarioContexto, nivel: str, papel: str,
+                  tomador_id: int | None, prestador_id: int | None) -> bool:
+    """Único lugar que decide quem pode convidar quem. Hoje só a plataforma convida (qualquer nível e papel);
+    o admin do tomador e o do prestador entram aqui, nos limites da própria organização."""
+    return usuario.nivel == "plataforma"
+
+
 def _id_valido(id_: int) -> bool:
     return 1 <= id_ <= ID_MAX
 
