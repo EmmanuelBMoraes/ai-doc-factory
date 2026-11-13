@@ -174,3 +174,48 @@ def test_rota_download_documento_inexistente_retorna_404():
     assert resp.status_code == 404
 
 
+
+
+def _lote_com_folha_pagamento(db, contrato_id, competencia="2026-03"):
+    """Lote com um documento folha_pagamento sem nome de empresa extraído (só a competência)."""
+    import uuid
+
+    lote = db.execute("INSERT INTO lote (sha256, nome_arquivo, contrato_id) VALUES (%s, 'lote.pdf', %s) RETURNING id",
+                      (uuid.uuid4().hex * 2, contrato_id)).fetchone()[0]
+    doc = db.execute("INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, tipo) "
+                     "VALUES (%s, 1, 1, 1, 'folha_pagamento') RETURNING id", (lote,)).fetchone()[0]
+    db.execute("INSERT INTO documento_campos (documento_id, campo, valor, origem) VALUES (%s, 'competencia', %s, 'gemini')",
+               (doc, competencia))
+    return lote, doc
+
+
+def test_nome_usa_prestador_do_contrato_e_colisao_por_contrato(orgs):
+    """Sem nome de empresa extraído, a folha de pagamento leva a razão social do prestador do contrato do lote; a
+    numeração de colisão vale entre lotes do mesmo contrato e não entre contratos diferentes."""
+    from app.renomeacao import atualizar_nome_padronizado
+
+    db = orgs.db
+    c1, c2 = orgs.contrato(), orgs.contrato()
+    razao = db.execute("SELECT p.razao_social FROM contrato c JOIN prestador p ON p.id = c.prestador_id "
+                       "WHERE c.id = %s", (c1,)).fetchone()[0]
+    _, d1 = _lote_com_folha_pagamento(db, c1)
+    _, d2 = _lote_com_folha_pagamento(db, c1)
+    _, d3 = _lote_com_folha_pagamento(db, c2)
+
+    n1 = atualizar_nome_padronizado(db, d1)
+    assert n1 == f"folha_pagamento_{slugificar(razao)}_2026-03.pdf"
+    n2 = atualizar_nome_padronizado(db, d2)
+    nomes = dict(db.execute("SELECT id, nome_padronizado FROM documento WHERE id = ANY(%s)", ([d1, d2],)).fetchall())
+    stem = n1[:-4]
+    assert nomes == {d1: f"{stem}_01.pdf", d2: f"{stem}_02.pdf"} and n2 == f"{stem}_02.pdf"
+    assert not atualizar_nome_padronizado(db, d3).endswith("_01.pdf")  # outro contrato: sem colisão
+
+
+def test_nome_sem_contrato_nao_quebra(orgs):
+    from app.renomeacao import atualizar_nome_padronizado
+
+    lote, doc = _lote_com_folha_pagamento(orgs.db, None)
+    try:
+        assert atualizar_nome_padronizado(orgs.db, doc) == "folha_pagamento_2026-03.pdf"
+    finally:
+        orgs.db.execute("DELETE FROM lote WHERE id = %s", (lote,))

@@ -266,16 +266,16 @@ def resolver_colisoes_nomes(itens: list[tuple[int, str]]) -> dict[int, str]:
 def atualizar_nome_padronizado(conn, documento_id: int) -> str | None:
     """Recalcula e persiste `documento.nome_padronizado` a partir dos campos atuais e resolve colisões."""
     row = conn.execute(
-        "SELECT d.tipo, d.lote_id, l.nome_arquivo, l.empresa_id, e.nome "
+        "SELECT d.tipo, d.lote_id, l.nome_arquivo, l.contrato_id, p.razao_social "
         "FROM documento d "
         "JOIN lote l ON l.id = d.lote_id "
-        "LEFT JOIN empresa e ON e.id = l.empresa_id "
+        "LEFT JOIN contrato c ON c.id = l.contrato_id LEFT JOIN prestador p ON p.id = c.prestador_id "
         "WHERE d.id = %s",
         (documento_id,),
     ).fetchone()
     if row is None:
         return None
-    tipo, lote_id, nome_original, empresa_id, nome_empresa_lote = row
+    tipo, lote_id, nome_original, contrato_id, nome_empresa_lote = row
     campos = dict(
         conn.execute(
             "SELECT campo, valor FROM documento_campos WHERE documento_id = %s",
@@ -292,13 +292,13 @@ def atualizar_nome_padronizado(conn, documento_id: int) -> str | None:
     stem = nome_base[:-4] if nome_base.endswith(".pdf") else nome_base
     padrao_colisao = f"^{re.escape(stem)}(?:_[0-9]{{2}})?\\.pdf$"
 
-    if empresa_id is not None:
+    if contrato_id is not None:
         concorrentes = conn.execute(
             "SELECT d.id, d.nome_padronizado FROM documento d "
             "JOIN lote l ON l.id = d.lote_id "
-            "WHERE l.empresa_id = %s AND d.id <> %s AND d.nome_padronizado ~ %s "
+            "WHERE l.contrato_id = %s AND d.id <> %s AND d.nome_padronizado ~ %s "
             "ORDER BY d.id",
-            (empresa_id, documento_id, padrao_colisao),
+            (contrato_id, documento_id, padrao_colisao),
         ).fetchall()
     else:
         concorrentes = conn.execute(

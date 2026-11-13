@@ -97,33 +97,33 @@ def obter_analise_ponto(documento_id: int) -> dict:
 SEM_TIPO = "sem_tipo"
 
 
-def listar_documentos(empresa_id: int | None = None, falhou: bool | None = None) -> dict:
+def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None) -> dict:
     """Documentos agrupados pelo campo `tipo` (uma consulta só). Falha = estado 'erro'."""
     condicoes, args = [], []
-    if empresa_id is not None:
-        condicoes.append("l.empresa_id = %s")
-        args.append(empresa_id)
+    if contrato_id is not None:
+        condicoes.append("l.contrato_id = %s")
+        args.append(contrato_id)
     if falhou is True:
         condicoes.append("d.estado = 'erro'")
     elif falhou is False:
         condicoes.append("d.estado <> 'erro'")
     where = f"WHERE {' AND '.join(condicoes)}" if condicoes else ""
     with psycopg.connect(config.DATABASE_URL) as conn:
-        if empresa_id is not None and conn.execute(
-                "SELECT 1 FROM empresa WHERE id = %s", (empresa_id,)).fetchone() is None:
-            raise HTTPException(404, "empresa não encontrada")
+        if contrato_id is not None and conn.execute(
+                "SELECT 1 FROM contrato WHERE id = %s", (contrato_id,)).fetchone() is None:
+            raise HTTPException(404, "contrato não encontrado")
         rows = conn.execute(
             "SELECT d.id, d.lote_id, d.ordem, d.pagina_ini, d.pagina_fim, d.estado, d.tipo, d.confianca, "
-            f"l.empresa_id, l.nome_arquivo, l.criado_em, d.nome_padronizado FROM documento d JOIN lote l ON l.id = d.lote_id {where} "
+            f"l.contrato_id, l.nome_arquivo, l.criado_em, d.nome_padronizado FROM documento d JOIN lote l ON l.id = d.lote_id {where} "
             "ORDER BY d.lote_id, d.ordem",
             args,
         ).fetchall()
         campos = campos_por_documento(conn, [r_[0] for r_ in rows])
     grupos: dict[str, list] = {}
-    for id_, lote_id, ordem, ini, fim, estado, tipo, conf, emp, nome_arq, criado, nome_pad in rows:
+    for id_, lote_id, ordem, ini, fim, estado, tipo, conf, contrato, nome_arq, criado, nome_pad in rows:
         grupos.setdefault(tipo or SEM_TIPO, []).append(
             {"id": id_, "lote_id": lote_id, "ordem": ordem, "pagina_ini": ini, "pagina_fim": fim,
-             "estado": estado, "tipo": tipo, "confianca": conf, "empresa_id": emp,
+             "estado": estado, "tipo": tipo, "confianca": conf, "contrato_id": contrato,
              **extras_documento(campos.get(id_, {}), nome_arq, ini, fim, criado, nome_pad)})
     ordem_tipos = [*config.TIPOS, config.TIPO_DESCONHECIDO, SEM_TIPO]
     # tipo fora da lista (não esperado) vai depois dos conhecidos, antes de sem_tipo
@@ -217,10 +217,10 @@ def download_documento(documento_id: int) -> tuple[bytes, str]:
     """Retorna (bytes_pdf, nome_padronizado) recortando apenas as páginas do documento."""
     with psycopg.connect(config.DATABASE_URL) as conn:
         row = conn.execute(
-            "SELECT d.lote_id, d.pagina_ini, d.pagina_fim, d.tipo, d.nome_padronizado, l.nome_arquivo, e.nome "
+            "SELECT d.lote_id, d.pagina_ini, d.pagina_fim, d.tipo, d.nome_padronizado, l.nome_arquivo, p.razao_social "
             "FROM documento d "
             "JOIN lote l ON l.id = d.lote_id "
-            "LEFT JOIN empresa e ON e.id = l.empresa_id "
+            "LEFT JOIN contrato c ON c.id = l.contrato_id LEFT JOIN prestador p ON p.id = c.prestador_id "
             "WHERE d.id = %s",
             (documento_id,),
         ).fetchone()

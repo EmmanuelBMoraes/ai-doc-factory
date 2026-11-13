@@ -122,7 +122,7 @@ def test_upload_imagem_grava_original_pdf_e_e_idempotente(cliente):
     assert pdf.read_bytes().startswith(b"%PDF")
     antes = _contagem()
     r2 = http.post("/lotes", files={"arquivo": ("outro_nome.bin", dados, "application/octet-stream")})
-    assert r2.json() == {"lote_id": id_, "estado": "recebido", "existente": True, "empresa_id": None}
+    assert r2.json() == {"lote_id": id_, "estado": "recebido", "existente": True, "contrato_id": None}
     assert _contagem() == antes
 
 

@@ -25,14 +25,14 @@ from app.routers.auth import actions as auth_actions
 from app.routers.auth.schemas import TokenOut, UsuarioOut
 from app.routers.busca import actions as busca_actions
 from app.routers.busca.schemas import ResultadoBuscaOut
-from app.routers.cadastro_empresas import actions as cad_actions
-from app.routers.cadastro_empresas.schemas import EmpresaOut
 from app.routers.documentos import actions as doc_actions
 from app.routers.documentos.schemas import AnalisePontoOut, DocumentoOut, DocumentosAgrupadosOut
 from app.routers.empresas import actions as emp_actions
 from app.routers.empresas.schemas import ConformidadeEmpresaOut, ConformidadeLoteOut, EmpresaResumoOut
 from app.routers.lotes import actions as lote_actions
 from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
+from app.routers.organizacoes import actions as org_actions
+from app.routers.organizacoes.schemas import ContratoOut, PrestadorOut, TomadorOut
 from app.routers.revisao import actions as rev_actions
 from app.routers.revisao.schemas import ItemFilaRevisaoOut, Revisao, RevisaoOut
 from app.routers.tipos import actions as tipos_actions
@@ -166,7 +166,7 @@ def test_upload_de_lote():
     lote = r.json()["lote_id"]
     try:
         LoteCriadoOut.model_validate(r.json())
-        assert r.json() == {"lote_id": lote, "estado": "recebido", "existente": False, "empresa_id": None}
+        assert r.json() == {"lote_id": lote, "estado": "recebido", "existente": False, "contrato_id": None}
         r2 = client.post("/lotes", files={"arquivo": ("a.pdf", pdf, "application/pdf")})
         assert r2.json()["existente"] is True and r2.json()["lote_id"] == lote
         assert "reprocessando" not in r2.json()  # chave condicional: ausente fora do reenvio de lote em erro
@@ -191,7 +191,7 @@ def test_reenvio_de_lote_em_erro_devolve_reprocessando(monkeypatch):
         em_erro()
         r = client.post("/lotes", files={"arquivo": ("e.pdf", pdf, "application/pdf")})
         corpo = _confere_resposta("POST /lotes", r, esperado, LoteCriadoOut)
-        assert corpo == {"lote_id": lote, "estado": "recebido", "existente": True, "empresa_id": None,
+        assert corpo == {"lote_id": lote, "estado": "recebido", "existente": True, "contrato_id": None,
                          "reprocessando": True}
     finally:
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
@@ -359,19 +359,32 @@ def test_analise_ponto(cenario, monkeypatch):
     assert client.get(f"/documentos/{ids[0]}/analise-ponto").status_code == 404  # não é folha de ponto
 
 
-def test_cadastro_empresas():
-    nome = "Schemas " + uuid.uuid4().hex[:8]
-    r = client.post("/cadastro-empresas", json={"nome": nome})
-    empresa_id = r.json()["id"]
-    try:
-        _confere_resposta("POST /cadastro-empresas", r, cad_actions.obter_empresa(empresa_id), EmpresaOut, status=201)
-        _confere("GET /cadastro-empresas/{empresa_id}", f"/cadastro-empresas/{empresa_id}", EmpresaOut,
-                 cad_actions.obter_empresa(empresa_id))
-        lista = _confere("GET /cadastro-empresas", "/cadastro-empresas", EmpresaOut, cad_actions.listar_empresas())
-        assert nome in {e["nome"] for e in lista}
-    finally:
-        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
-            conn.execute("DELETE FROM empresa WHERE id = %s", (empresa_id,))
+def test_organizacoes(orgs):
+    def achar(itens, id_):
+        return next(i for i in itens if i["id"] == id_)
+    r = client.post("/tomadores", json={"nome": "Schemas " + uuid.uuid4().hex[:8], "cnpj": "11.222.333/0001-81"})
+    tomador = r.json()["id"]
+    orgs.registrar("tomador", tomador)
+    _confere_resposta("POST /tomadores", r, achar(org_actions.listar_tomadores(), tomador), TomadorOut, status=201)
+    lista = _confere("GET /tomadores", "/tomadores", TomadorOut, org_actions.listar_tomadores())
+    assert achar(lista, tomador)["cnpj"] == "11222333000181"
+
+    r = client.post("/prestadores", json={"cnpj": "12345678000195", "razao_social": "Schemas " + uuid.uuid4().hex[:8]})
+    prestador = r.json()["id"]
+    orgs.registrar("prestador", prestador)
+    _confere_resposta("POST /prestadores", r, achar(org_actions.listar_prestadores(), prestador), PrestadorOut,
+                      status=201)
+    _confere("GET /prestadores", "/prestadores", PrestadorOut, org_actions.listar_prestadores())
+
+    r = client.post("/contratos", json={"tomador_id": tomador, "prestador_id": prestador,
+                                        "vigencia_inicio": "2026-01-01"})
+    contrato = r.json()["id"]
+    orgs.registrar("contrato", contrato)
+    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(), contrato), ContratoOut, status=201)
+    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos())
+    filtrados = _confere("GET /contratos", f"/contratos?tomador_id={tomador}&prestador_id={prestador}", ContratoOut,
+                         org_actions.listar_contratos(tomador, prestador))
+    assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
 
 def test_auth_login_e_me(auth_real):
@@ -400,8 +413,8 @@ def test_openapi_expoe_os_modelos():
     esquemas = client.get("/openapi.json").json()["components"]["schemas"]
     for nome in ("SaudeOut", "TipoOut", "ResultadoBuscaOut", "LoteCriadoOut", "LoteOut", "ConformidadeEmpresaOut",
                  "ConformidadeLoteOut", "EmpresaResumoOut", "DocumentoOut", "DocumentosAgrupadosOut",
-                 "AnalisePontoOut", "ItemFilaRevisaoOut", "RevisaoOut", "EmpresaOut", "TokenOut", "UsuarioOut",
-                 "EventoProgressoOut", "ContagensPontoOut"):
+                 "AnalisePontoOut", "ItemFilaRevisaoOut", "RevisaoOut", "TokenOut", "UsuarioOut",
+                 "EventoProgressoOut", "ContagensPontoOut", "TomadorOut", "PrestadorOut", "ContratoOut"):
         assert nome in esquemas, nome
 
 
@@ -425,9 +438,12 @@ COMPARACOES = {
     "GET /empresas": ["test_conformidade"],
     "GET /empresas/{cnpj:path}/conformidade": ["test_conformidade"],
     "GET /lotes/{lote_id}/conformidade": ["test_conformidade"],
-    "POST /cadastro-empresas": ["test_cadastro_empresas"],
-    "GET /cadastro-empresas": ["test_cadastro_empresas"],
-    "GET /cadastro-empresas/{empresa_id}": ["test_cadastro_empresas"],
+    "POST /tomadores": ["test_organizacoes"],
+    "GET /tomadores": ["test_organizacoes"],
+    "POST /prestadores": ["test_organizacoes"],
+    "GET /prestadores": ["test_organizacoes"],
+    "POST /contratos": ["test_organizacoes"],
+    "GET /contratos": ["test_organizacoes"],
     "POST /auth/login": ["test_auth_login_e_me"],
     "GET /auth/me": ["test_auth_login_e_me"],
 }

@@ -64,7 +64,7 @@ class DocumentoListadoOut(ExtrasDocumentoOut):
     estado: str
     tipo: str | None
     confianca: float | None
-    empresa_id: int | None
+    contrato_id: int | None
 
 
 class GrupoDocumentosOut(BaseModel):

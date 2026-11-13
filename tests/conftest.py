@@ -59,3 +59,63 @@ def extracoes(monkeypatch):
     from app.routers.documentos import actions as documentos_actions
     monkeypatch.setattr(documentos_actions, "enfileirar_extracao", registrar)
     return pedidas
+
+
+def cnpj_valido(base: int) -> str:
+    """CNPJ de teste (não é de empresa real) com dígitos verificadores corretos, a partir de um inteiro de 8 dígitos
+    (a filial 0001 é fixa)."""
+    c = f"{base % 10 ** 8:08d}0001"
+    for pesos in ([5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]):
+        resto = sum(int(d) * p for d, p in zip(c, pesos)) % 11
+        c += str(0 if resto < 2 else 11 - resto)
+    return c
+
+
+@pytest.fixture
+def orgs():
+    """Cria tomador, prestador e contrato direto no banco e apaga tudo no fim (lotes dos contratos primeiro,
+    depois contratos, prestadores e tomadores). Devolve um objeto com os criadores."""
+    import uuid
+
+    import psycopg
+
+    conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
+    criados = {"tomador": [], "prestador": [], "contrato": []}
+
+    class Ajuda:
+        db = conn
+
+        @staticmethod
+        def tomador(ativo=True):
+            i = conn.execute("INSERT INTO tomador (nome, ativo) VALUES (%s, %s) RETURNING id",
+                             (f"Tomador {uuid.uuid4().hex}", ativo)).fetchone()[0]
+            criados["tomador"].append(i)
+            return i
+
+        @staticmethod
+        def prestador(ativo=True):
+            cnpj = cnpj_valido(uuid.uuid4().int)
+            i = conn.execute("INSERT INTO prestador (cnpj, razao_social, ativo) VALUES (%s, %s, %s) RETURNING id",
+                             (cnpj, f"Prestador {uuid.uuid4().hex}", ativo)).fetchone()[0]
+            criados["prestador"].append(i)
+            return i
+
+        @staticmethod
+        def contrato(ativo=True, tomador_ativo=True, prestador_ativo=True):
+            i = conn.execute(
+                "INSERT INTO contrato (tomador_id, prestador_id, ativo) VALUES (%s, %s, %s) RETURNING id",
+                (Ajuda.tomador(tomador_ativo), Ajuda.prestador(prestador_ativo), ativo)).fetchone()[0]
+            criados["contrato"].append(i)
+            return i
+
+        @staticmethod
+        def registrar(tipo, id_):
+            """Para o que o teste criou pela API."""
+            criados[tipo].append(id_)
+
+    yield Ajuda
+    conn.execute("DELETE FROM lote WHERE contrato_id = ANY(%s)", (criados["contrato"],))
+    conn.execute("DELETE FROM contrato WHERE id = ANY(%s)", (criados["contrato"],))
+    conn.execute("DELETE FROM prestador WHERE id = ANY(%s)", (criados["prestador"],))
+    conn.execute("DELETE FROM tomador WHERE id = ANY(%s)", (criados["tomador"],))
+    conn.close()

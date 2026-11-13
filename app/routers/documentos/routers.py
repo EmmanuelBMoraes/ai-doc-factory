@@ -1,17 +1,21 @@
-from fastapi import APIRouter, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Response
 
 from app.routers.documentos import actions
 from app.routers.documentos.schemas import (
     AnalisePontoOut, AtualizacaoCampos, DocumentoOut, DocumentosAgrupadosOut)
+from app.routers.organizacoes.schemas import IdBanco
 from app.routers.revisao.schemas import Revisao
 
 router = APIRouter(tags=["Documentos"])
 
 
 @router.get("/documentos", response_model=DocumentosAgrupadosOut)
-def listar_documentos(empresa_id: int | None = None, falhou: bool | None = None):
-    """Agrupados por tipo. `falhou=true` só estado 'erro'; `false` exclui; omitido não filtra."""
-    return actions.listar_documentos(empresa_id, falhou)
+def listar_documentos(contrato_id: Annotated[IdBanco | None, Query()] = None, falhou: bool | None = None):
+    """Agrupados por tipo. `contrato_id` filtra pelo contrato do lote (404 se não existe). `falhou=true` só estado
+    'erro'; `false` exclui; omitido não filtra."""
+    return actions.listar_documentos(contrato_id, falhou)
 
 
 @router.patch("/documentos/{documento_id}/tipo", response_model=DocumentoOut)
