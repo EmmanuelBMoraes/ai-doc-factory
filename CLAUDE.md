@@ -6,7 +6,7 @@ Projeto de hackathon (7 horas). Recebe PDFs de lote com muitas páginas escanead
 
 ## Como trabalhamos
 
-- **Supervisão e implementação:** a sessão principal (Opus) só planeja, delega e revisa. A implementação é feita por subagents com `model: sonnet`, um por etapa, em worktree próprio.
+- **Supervisão e implementação:** a sessão principal (Opus) só planeja, delega e revisa. A implementação é feita por subagents com `model: sonnet`, um por etapa, em worktree próprio. Exceção: o trabalho de precisão da análise de documentos vai para o Fable (ver "Fable na análise de documentos").
 - **PRs pequenos:** um PR por entrega, contra `master`. Cada commit tem no máximo ~800 linhas alteradas. Se passar disso, divida. Arquivos gerados e lockfiles não entram nessa conta.
 - **Nunca commitar direto na `master`.** Crie uma branch `feat/...`, `fix/...` ou `chore/...`.
 - **Sem assinatura nos commits:** não adicione `Co-Authored-By` nem outra linha de atribuição.
@@ -21,6 +21,34 @@ Projeto de hackathon (7 horas). Recebe PDFs de lote com muitas páginas escanead
   - Mantenha `.env.example` atualizado, sem valores.
   - Antes de cada commit, revise o que está sendo adicionado com `git diff --cached`.
   - Se uma chave vazar, pare e avise a pessoa responsável, porque ela precisa revogar a chave. Apagar o commit não basta.
+
+### Fable na análise de documentos
+
+**Vale só enquanto o Fable estiver disponível.** Se o subagent com `model: fable` falhar por indisponibilidade ou limite, a divisão volta ao padrão (Opus planeja e revisa, Sonnet implementa) e a sessão principal avisa a pessoa responsável. O ciclo de trabalho abaixo continua valendo com qualquer modelo.
+
+**Divisão de papéis:**
+
+- Em segmentação (`app/segmentacao.py`), classificação (`app/classificar.py`, `app/classificador_*.py`, `app/prompts.py`) e análise de ponto (`app/ponto.py`, `app/analise.py`), um subagent com `model: fable` investiga, propõe **e implementa** a mudança, em worktree próprio.
+- O Sonnet fica com o que não é análise: API, frontend, infraestrutura e migrações.
+- O Opus continua planejando e revisando os PRs.
+
+**Ciclo de melhoria (sempre nesta ordem):**
+
+1. Rodar a avaliação no conjunto de **ajuste** (`scripts/avaliar_segmentacao.py`, `scripts/avaliar_classificacao.py`, `scripts/relatorio_cobertura.py`) e guardar a saída.
+2. Para cada erro, olhar o OCR e a imagem das páginas envolvidas. Montar uma tabela de erros por causa, com contagem (ex.: verso em branco, paginação lida errado, documentos consecutivos do mesmo tipo, OCR degradado, CNPJ ilegível), **antes** de mudar qualquer coisa.
+3. Atacar uma hipótese por vez, começando pela causa mais frequente.
+4. Medir de novo no mesmo conjunto de ajuste. Se não melhorou, reverter.
+5. O conjunto de **teste** só é lido no fim. Regras, limiares e prompts nunca são ajustados olhando o teste.
+
+**Prioridades:**
+
+- **Segmentação primeiro:** é a pior métrica (no teste, 0,789 de documentos exatos, com erros concentrados em L0001, L0006 e L0008). As regras mudaram depois dessa medição, então meça de novo em lotes novos.
+- **Classificação:** F1 1,000 em dados sintéticos não discrimina entre os métodos. Proponha casos difíceis (OCR ruim, documento de uma página, holerite × folha de pagamento). O `gerar_lotes.py` não pode ser reescrito: para mudar o gerador, pergunte antes.
+- **Ponto:**
+  - Sem gabarito não há métrica. O Fable pode rascunhar um gabarito de divergências a partir das imagens (`gabarito_ponto.csv`, marcado como rascunho). Uma pessoa confere uma amostra antes de ele virar gabarito. Nunca meça o Gemini contra um gabarito não revisado.
+  - Audite cada regra de `ponto.py` citando o artigo da CLT ou da Portaria. Cubra com testes de borda: virada da meia-noite, hora noturna de 52min30s, tolerância de 5 e 10 min, interjornada entre meses e folha com dias faltando.
+
+**Brief para o Fable:** passe o objetivo, o critério de pronto, as restrições, o caminho dos arquivos e o comando de avaliação, em vez de um roteiro passo a passo. Peça a saída real dos comandos rodados e a tabela de causas.
 
 ### Se estiver atrasado, corte nesta ordem
 
