@@ -3,6 +3,12 @@
 Fora do fan-in do lote. Falha do Gemini ou resposta inválida não trava nada: o campo fica ausente e vira
 pendência no cálculo. O texto do documento é dado não confiável: só o que passa pela validação abaixo
 (lista fixa de campos, formatos e enum) chega ao banco.
+
+Quando a primeira página do documento possui camada de texto digital nativo (`pagina.texto_nativo = True`,
+extraída diretamente pelo PyMuPDF sem OCR), a extração tenta primeiro enviar apenas o texto (`imagem_png=None`)
+com o prompt específico `VERSAO_PROMPT_EXTRACAO_TEXTO`. Se faltar qualquer campo essencial esperado para aquele
+tipo documental (ex.: dado presente apenas em carimbo ou figura dentro do PDF), faz fallback automático
+enviando a imagem PNG da primeira página com o prompt `VERSAO_PROMPT_EXTRACAO`.
 """
 import calendar
 import logging
@@ -14,7 +20,7 @@ import redis
 
 from app import config, llm, prompts
 from app.classificar import _imagem_primeira_pagina, montar_texto
-from app.conformidade import parse_data
+from app.conformidade import parse_data, validar_cnpj, validar_cpf
 from app.eventos import concluir_tarefa_pos, lote_cancelado, publicar_evento
 from app.filas import enfileirar
 from app.renomeacao import (
@@ -118,6 +124,52 @@ def limpar(dados) -> dict[str, str]:
     return saida
 
 
+def campos_essenciais_completos(tipo: str | None, campos: dict[str, str]) -> bool:
+    """Verifica se a extração somente por texto preencheu todos os campos críticos e matematicamente
+    válidos esperados para o tipo documental. Se faltar qualquer um, o fallback com imagem PNG é acionado."""
+    if tipo == "atestado_medico":
+        return bool(campos.get("nome") and campos.get("data_emissao"))
+
+    if validar_cnpj(campos.get("cnpj_prestadora")) is None:
+        return False
+
+    if tipo == "folha_pagamento":
+        return bool(campos.get("competencia"))
+
+    if tipo == "folha_ponto":
+        tem_periodo = bool(campos.get("competencia") or (campos.get("inicio_periodo") and campos.get("fim_periodo")))
+        return bool(campos.get("nome") and tem_periodo)
+
+    if not campos.get("nome") or validar_cpf(campos.get("cpf")) is None:
+        return False
+
+    if tipo == "aso":
+        return bool(campos.get("data_exame") and campos.get("tipo_exame"))
+    if tipo == "contrato_trabalho":
+        prazo = campos.get("tipo_prazo")
+        if not campos.get("data_admissao") or prazo not in ("determinado", "indeterminado"):
+            return False
+        if prazo == "determinado" and not campos.get("data_termino"):
+            return False
+        return True
+    if tipo == "holerite":
+        return bool(campos.get("competencia"))
+    if tipo == "recibo_ferias":
+        return bool(campos.get("inicio_ferias") and campos.get("fim_ferias"))
+    return False
+
+
+def _mesclar_campos_fallback(campos_texto: dict[str, str], campos_imagem: dict[str, str]) -> dict[str, str]:
+    """Combina os campos da tentativa só-texto com os do fallback com imagem (que enxergou texto + imagem).
+    A resposta com imagem prevalece, exceto se CNPJ/CPF dela vier inválido e o do texto nativo for válido."""
+    mesclado = {**campos_texto, **campos_imagem}
+    if validar_cnpj(campos_imagem.get("cnpj_prestadora")) is None and validar_cnpj(campos_texto.get("cnpj_prestadora")):
+        mesclado["cnpj_prestadora"] = campos_texto["cnpj_prestadora"]
+    if validar_cpf(campos_imagem.get("cpf")) is None and validar_cpf(campos_texto.get("cpf")):
+        mesclado["cpf"] = campos_texto["cpf"]
+    return mesclado
+
+
 def _apurar_pendencias_lote(conn, lote_id: int) -> tuple[int, bool]:
     """Devolve (docs_pendentes_classificacao, ha_analise_ponto_pendente_no_lote)."""
     lote_row = conn.execute("SELECT docs_pendentes FROM lote WHERE id = %s", (lote_id,)).fetchone()
@@ -161,17 +213,33 @@ def extrair_campos(payload: dict) -> None:
         if cancelado(doc[1]):
             concluir_tarefa_pos(doc[1], f"extracao:{doc_id}")
             return
-        textos = [t for (t,) in conn.execute("SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
-    lote_id = doc[1]
+        paginas = conn.execute(
+            "SELECT texto, texto_nativo FROM pagina WHERE documento_id = %s ORDER BY numero",
+            (doc_id,),
+        ).fetchall()
+    lote_id, pagina_ini, tipo_doc = doc[1], doc[2], doc[3]
+    texto_doc = montar_texto([t for t, _ in paginas], TEXTO_MAX)
+    primeira_nativa = bool(paginas and paginas[0][1])
+
+    log.info(
+        "lote_%s | doc #%s (%s) -> extração iniciada em modo %s",
+        lote_id, doc_id, tipo_doc, "nativo (só texto)" if primeira_nativa else "escaneado (texto + imagem)",
+    )
     publicar_evento(
         lote_id,
         "extracao",
         f"Extraindo dados cadastrais (Gemini) do documento #{doc_id}...",
         documento_id=doc_id,
     )
-    prompt = prompts.prompt_extracao(doc[3], montar_texto(textos, TEXTO_MAX))
+    prompt_img = prompts.prompt_extracao(tipo_doc, texto_doc, com_imagem=True)
+    prompt_texto = prompts.prompt_extracao(tipo_doc, texto_doc, com_imagem=False) if primeira_nativa else None
     try:
-        dados = llm.texto_gemini(llm.gemini_gerar(prompt, prompts.SCHEMA_EXTRACAO, _imagem_primeira_pagina(lote_id, doc[2])))
+        if primeira_nativa:
+            dados = llm.texto_gemini(llm.gemini_gerar(prompt_texto, prompts.SCHEMA_EXTRACAO, None))
+        else:
+            dados = llm.texto_gemini(
+                llm.gemini_gerar(prompt_img, prompts.SCHEMA_EXTRACAO, _imagem_primeira_pagina(lote_id, pagina_ini))
+            )
     except llm.LLMErro as e:
         log.warning("extração do documento %s indisponível: %s", doc_id, e)
         if cancelado(lote_id):
@@ -202,8 +270,31 @@ def extrair_campos(payload: dict) -> None:
             documento_id=doc_id,
         )
         return
-    origem = f"gemini:{prompts.VERSAO_PROMPT_EXTRACAO}"
+
     campos_limpos = limpar(dados)
+    usou_imagem = not primeira_nativa
+    if primeira_nativa and not campos_essenciais_completos(tipo_doc, campos_limpos):
+        log.info(
+            "lote_%s | doc #%s (%s) -> campos essenciais incompletos só com texto (%s); acionando fallback com imagem",
+            lote_id, doc_id, tipo_doc, sorted(campos_limpos),
+        )
+        imagem_fallback = _imagem_primeira_pagina(lote_id, pagina_ini)
+        if imagem_fallback is not None:
+            try:
+                dados_img = llm.texto_gemini(llm.gemini_gerar(prompt_img, prompts.SCHEMA_EXTRACAO, imagem_fallback))
+                if isinstance(dados_img, dict):
+                    campos_limpos = _mesclar_campos_fallback(campos_limpos, limpar(dados_img))
+                    usou_imagem = True
+            except llm.LLMErro as e:
+                log.warning("fallback com imagem na extração do documento %s falhou: %s", doc_id, e)
+    elif primeira_nativa:
+        log.info(
+            "lote_%s | doc #%s (%s) -> extração nativa só texto completa (%d campos, sem PNG)",
+            lote_id, doc_id, tipo_doc, len(campos_limpos),
+        )
+
+    versao_usada = prompts.VERSAO_PROMPT_EXTRACAO if usou_imagem else prompts.VERSAO_PROMPT_EXTRACAO_TEXTO
+    origem = f"gemini:{versao_usada}"
     with psycopg.connect(config.DATABASE_URL) as conn:  # substitui o que o Gemini gravou antes; correção humana fica
         if cancelado(lote_id):
             concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
